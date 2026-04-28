@@ -15,6 +15,8 @@ import Benchmarks from "@/pages/Benchmarks";
 import ImportPage from "@/pages/ImportPage";
 import Users from "@/pages/Users";
 import AddDealer from "@/pages/AddDealer";
+import EditDealer from "@/pages/EditDealer";
+import Settings from "@/pages/Settings";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -34,11 +36,13 @@ function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/dealers" element={<Dealers />} />
               <Route path="/dealers/new" element={<AddDealer />} />
+              <Route path="/dealers/:id/edit" element={<EditDealer />} />
               <Route path="/dealers/:id" element={<DealerProfile />} />
               <Route path="/groups" element={<Groups />} />
               <Route path="/groups/:id" element={<GroupDashboard />} />
               <Route path="/benchmarks" element={<Benchmarks />} />
               <Route path="/import" element={<ImportPage />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

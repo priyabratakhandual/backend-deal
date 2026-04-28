@@ -1,22 +1,33 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from "recharts";
-import { Building2, Phone, Mail, MapPin, Calendar, ArrowLeft } from "lucide-react";
+import { Building2, Phone, Mail, MapPin, Calendar, ArrowLeft, Edit, FileText } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const fmt = (n) => new Intl.NumberFormat("en-IN").format(Math.round(n || 0));
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 export default function DealerProfile() {
   const { id } = useParams();
+  const nav = useNavigate();
+  const { user } = useAuth();
+  const canEdit = ["admin", "business_user", "data_entry"].includes(user?.role);
   const [d, setD] = useState(null);
   const [bm, setBm] = useState([]);
+
+  const downloadPdf = async () => {
+    const res = await api.get(`/dealers/${id}/report.pdf`, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a"); a.href = url; a.download = `${d?.dealer_code || "dealer"}_report.pdf`; a.click();
+  };
 
   useEffect(() => {
     (async () => {
@@ -53,6 +64,10 @@ export default function DealerProfile() {
       <Link to="/dealers" className="text-xs text-[#0F4C81] inline-flex items-center gap-1 hover:underline">
         <ArrowLeft className="w-3 h-3" /> Back to Dealers
       </Link>
+      <div className="flex justify-end gap-2 -mt-6">
+        <Button variant="outline" size="sm" onClick={downloadPdf} data-testid="dealer-pdf-btn"><FileText className="w-4 h-4 mr-2"/>PDF Report</Button>
+        {canEdit && <Button size="sm" className="bg-[#0F4C81] hover:bg-[#0C3D67]" onClick={()=>nav(`/dealers/${id}/edit`)} data-testid="dealer-edit-btn"><Edit className="w-4 h-4 mr-2"/>Edit / Enter Data</Button>}
+      </div>
 
       {/* Profile Card Header */}
       <Card className="p-6">

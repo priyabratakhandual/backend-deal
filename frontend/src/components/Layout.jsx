@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
-  LayoutDashboard, Building2, Users, Upload, BarChart3, LogOut, Network, Award,
+  LayoutDashboard, Building2, Users, Upload, BarChart3, LogOut, Network, Award, Settings as SettingsIcon,
 } from "lucide-react";
 
 const nav = [
@@ -12,6 +12,7 @@ const nav = [
   { to: "/groups", label: "Group Dealers", icon: Network },
   { to: "/benchmarks", label: "Benchmarks", icon: Award },
   { to: "/import", label: "Excel Import", icon: Upload, roles: ["admin", "data_entry"] },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, roles: ["admin"] },
   { to: "/users", label: "Users", icon: Users, roles: ["admin"] },
 ];
 

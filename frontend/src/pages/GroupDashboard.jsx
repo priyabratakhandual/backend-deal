@@ -3,8 +3,9 @@ import api from "@/lib/api";
 import { useParams, Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
-import { ArrowLeft, Network } from "lucide-react";
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
+import { ArrowLeft, Network, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const fmt = (n) => new Intl.NumberFormat("en-IN").format(Math.round(n || 0));
 
@@ -26,13 +27,22 @@ export default function GroupDashboard() {
   const t = data.totals;
 
   const yearTrend = Object.entries(m.by_year || {}).map(([year, v]) => ({ year, target: v.target, actual: v.actual })).sort((a,b)=>a.year-b.year);
+  const outletsM = data.outlets || [];
+  const outletCompare = outletsM.map(o => ({ name: o.city, target: o.metrics?.current_year_target || 0, actual: o.metrics?.current_year_actual || 0 }));
 
-  // Compute outlet rows (split monthly_sales heuristically by outlet share = equal). For demo we show outlets with their static info; the table represents outlet-level static.
+  const downloadPdf = async () => {
+    const res = await api.get(`/dealers/${id}/report.pdf`, { responseType: "blob" });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement("a"); a.href = url; a.download = `${g.dealer_code}_group_report.pdf`; a.click();
+  };
   return (
     <div className="space-y-5" data-testid="group-dashboard">
       <Link to="/groups" className="text-xs text-[#0F4C81] inline-flex items-center gap-1 hover:underline">
         <ArrowLeft className="w-3 h-3" /> Back to Groups
       </Link>
+      <div className="flex justify-end -mt-6">
+        <Button variant="outline" size="sm" onClick={downloadPdf} data-testid="group-pdf-btn"><FileText className="w-4 h-4 mr-2"/>PDF Report</Button>
+      </div>
 
       <Card className="p-6">
         <div className="flex items-start gap-4">
@@ -75,6 +85,20 @@ export default function GroupDashboard() {
         </ResponsiveContainer>
       </Card>
 
+      <Card className="p-4">
+        <div className="text-sm font-semibold mb-3">Outlet Comparison ({new Date().getFullYear()})</div>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={outletCompare}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+            <XAxis dataKey="name" fontSize={12} />
+            <YAxis fontSize={12} />
+            <Tooltip /><Legend />
+            <Bar dataKey="target" fill="#F59E0B" radius={[3,3,0,0]} />
+            <Bar dataKey="actual" fill="#0F4C81" radius={[3,3,0,0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Tile label="Showroom Owned" value={t.showroom_owned} />
         <Tile label="Showroom Leased" value={t.showroom_leased} />
@@ -87,40 +111,47 @@ export default function GroupDashboard() {
         <div className="overflow-x-auto">
           <table className="data-table w-full text-sm">
             <thead><tr>
-              <th className="text-left px-4 py-3">State</th>
-              <th className="text-left px-4 py-3">City</th>
-              <th className="text-left px-4 py-3">Code</th>
-              <th className="text-left px-4 py-3">Tier</th>
-              <th className="text-left px-4 py-3">Start of Business</th>
-              <th className="text-right px-4 py-3">Frontage (ft)</th>
-              <th className="text-right px-4 py-3">Showroom (sqft)</th>
-              <th className="text-right px-4 py-3">Workshop (sqft)</th>
-              <th className="text-right px-4 py-3">WS Bays</th>
-              <th className="text-right px-4 py-3">BP Bays</th>
-              <th className="text-left px-4 py-3">Showroom</th>
-              <th className="text-left px-4 py-3">Workshop</th>
+              <th className="text-left px-3 py-3">State</th>
+              <th className="text-left px-3 py-3">City</th>
+              <th className="text-left px-3 py-3">Code</th>
+              <th className="text-left px-3 py-3">Tier</th>
+              <th className="text-left px-3 py-3">Start</th>
+              <th className="text-right px-3 py-3">Showroom (sqft)</th>
+              <th className="text-right px-3 py-3">Workshop (sqft)</th>
+              <th className="text-right px-3 py-3">PY Sales</th>
+              <th className="text-right px-3 py-3">CY Target</th>
+              <th className="text-right px-3 py-3">CY Actual</th>
+              <th className="text-right px-3 py-3">Var</th>
+              <th className="text-right px-3 py-3">Growth %</th>
+              <th className="text-right px-3 py-3">YTD</th>
+              <th className="text-right px-3 py-3">YTD Gr%</th>
+              <th className="text-center px-3 py-3">Flag</th>
             </tr></thead>
             <tbody>
-              {(g.outlets || []).map((o) => (
-                <tr key={o.dealer_code} data-testid={`outlet-row-${o.dealer_code}`}>
-                  <td className="px-4 py-3">{o.state}</td>
-                  <td className="px-4 py-3">{o.city}</td>
-                  <td className="px-4 py-3 font-medium">{o.dealer_code}</td>
-                  <td className="px-4 py-3">{o.tier}</td>
-                  <td className="px-4 py-3">{o.start_of_business}</td>
-                  <td className="px-4 py-3 text-right num">{o.showroom_frontage}</td>
-                  <td className="px-4 py-3 text-right num">{fmt(o.showroom_area)}</td>
-                  <td className="px-4 py-3 text-right num">{fmt(o.workshop_area)}</td>
-                  <td className="px-4 py-3 text-right num">{o.workshop_bays}</td>
-                  <td className="px-4 py-3 text-right num">{o.bp_bays}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${o.showroom_ownership === 'Owned' ? 'flag-green' : 'flag-amber'}`}>{o.showroom_ownership}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${o.workshop_ownership === 'Owned' ? 'flag-green' : 'flag-amber'}`}>{o.workshop_ownership}</span>
-                  </td>
-                </tr>
-              ))}
+              {outletsM.map((o) => {
+                const om = o.metrics || {};
+                return (
+                  <tr key={o.dealer_code} data-testid={`outlet-row-${o.dealer_code}`}>
+                    <td className="px-3 py-2">{o.state}</td>
+                    <td className="px-3 py-2">{o.city}</td>
+                    <td className="px-3 py-2 font-medium">{o.dealer_code}</td>
+                    <td className="px-3 py-2">{o.tier}</td>
+                    <td className="px-3 py-2 text-xs">{o.start_of_business}</td>
+                    <td className="px-3 py-2 text-right num">{fmt(o.showroom_area)}</td>
+                    <td className="px-3 py-2 text-right num">{fmt(o.workshop_area)}</td>
+                    <td className="px-3 py-2 text-right num">₹{fmt(om.previous_year_actual)}</td>
+                    <td className="px-3 py-2 text-right num">₹{fmt(om.current_year_target)}</td>
+                    <td className="px-3 py-2 text-right num">₹{fmt(om.current_year_actual)}</td>
+                    <td className="px-3 py-2 text-right num">₹{fmt((om.current_year_actual||0)-(om.current_year_target||0))}</td>
+                    <td className="px-3 py-2 text-right num">{om.growth_pct}%</td>
+                    <td className="px-3 py-2 text-right num">₹{fmt(om.ytd_actual)}</td>
+                    <td className="px-3 py-2 text-right num">{om.ytd_growth_pct}%</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`flag-${om.performance_flag} text-[11px] px-2 py-0.5 rounded-full uppercase`}>{om.performance_flag}</span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
