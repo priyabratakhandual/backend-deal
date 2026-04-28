@@ -171,20 +171,31 @@ def _set_cookie(resp: Response, token: str):
     resp.set_cookie("access_token", token, httponly=True, secure=False, samesite="lax", max_age=86400, path="/")
 
 @api.post("/auth/register")
-async def register(body: UserCreate, response: Response):
+async def register(body: UserCreate, request: Request, response: Response):
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(400, "Email already registered")
+    # Only admins can assign non-viewer roles. Anonymous self-registration is forced to "viewer".
+    role = "viewer"
+    token = request.cookies.get("access_token") or (request.headers.get("Authorization", "")[7:] if request.headers.get("Authorization", "").startswith("Bearer ") else None)
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+            requester = await db.users.find_one({"id": payload.get("sub")})
+            if requester and requester.get("role") == "admin":
+                role = body.role
+        except jwt.InvalidTokenError:
+            pass
     uid = str(uuid.uuid4())
     doc = {
-        "id": uid, "email": email, "name": body.name, "role": body.role,
+        "id": uid, "email": email, "name": body.name, "role": role,
         "password_hash": hash_password(body.password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.users.insert_one(doc)
-    token = create_token(uid, email, body.role)
-    _set_cookie(response, token)
-    return {"id": uid, "email": email, "name": body.name, "role": body.role, "token": token}
+    new_token = create_token(uid, email, role)
+    _set_cookie(response, new_token)
+    return {"id": uid, "email": email, "name": body.name, "role": role, "token": new_token}
 
 @api.post("/auth/login")
 async def login(body: UserLogin, response: Response):

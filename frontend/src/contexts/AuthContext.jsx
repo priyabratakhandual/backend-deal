@@ -9,10 +9,13 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     (async () => {
+      const token = localStorage.getItem("globtier_token");
+      if (!token) { setUser(false); setLoading(false); return; }
       try {
         const { data } = await api.get("/auth/me");
         setUser(data);
       } catch {
+        localStorage.removeItem("globtier_token");
         setUser(false);
       } finally {
         setLoading(false);
