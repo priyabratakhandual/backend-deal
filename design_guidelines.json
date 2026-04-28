@@ -1,0 +1,138 @@
+{
+  "theme": "LIGHT",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_rationale": "Globtier is a dealer intelligence and performance management platform designed to replace Excel dashboards. Thus, the interface must prioritize high density, stark contrast, and unquestionable clarity. The Swiss archetype is chosen to give a sterile, authoritative foundation (10% grey/stark white) where data flags (Green, Amber, Red) can pop instantly. Using 'F-Pattern' hierarchy and data-dense tabular designs, the UI supports robust operations, metrics monitoring, and regional comparisons.",
+  "colors": {
+    "background": {
+      "default": "#F8F9FA",
+      "card": "#FFFFFF",
+      "header": "#FFFFFF",
+      "sidebar": "#111827"
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "tertiary": "#9CA3AF",
+      "inverse": "#F3F4F6"
+    },
+    "brand": {
+      "primary": "#0F4C81",
+      "primary_hover": "#0C3D67",
+      "accent": "#F59E0B"
+    },
+    "state": {
+      "success": "#10B981",
+      "success_bg": "#D1FAE5",
+      "warning": "#F59E0B",
+      "warning_bg": "#FEF3C7",
+      "error": "#EF4444",
+      "error_bg": "#FEE2E2",
+      "info": "#3B82F6",
+      "info_bg": "#DBEAFE"
+    },
+    "border": {
+      "default": "#E5E7EB",
+      "focus": "#3B82F6"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "heading": "Cabinet Grotesk, Inter, sans-serif",
+      "body": "Inter, Roboto, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "font_sizes": {
+      "h1": "text-3xl font-bold tracking-tight",
+      "h2": "text-xl font-semibold tracking-tight",
+      "h3": "text-lg font-medium",
+      "h4": "text-base font-medium",
+      "body": "text-sm",
+      "body_small": "text-xs",
+      "metric_large": "text-4xl font-bold tracking-tighter"
+    }
+  },
+  "spacing_and_layout": {
+    "density": "comfortable-dense",
+    "grid": {
+      "mode": "CONTROL ROOM",
+      "columns": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12",
+      "gap": "gap-4 md:gap-6",
+      "container_padding": "p-4 md:p-6 lg:p-8"
+    },
+    "components": {
+      "card_padding": "p-4",
+      "table_row_height": "h-10",
+      "input_height": "h-9",
+      "button_height": "h-9"
+    },
+    "border_radius": {
+      "card": "rounded-lg",
+      "button": "rounded-md",
+      "input": "rounded-md",
+      "badge": "rounded-full"
+    },
+    "shadows": {
+      "card": "shadow-sm",
+      "dropdown": "shadow-lg"
+    }
+  },
+  "components_strategy": {
+    "tables": {
+      "style": "Zebra striping optional, sticky headers, right-aligned numbers for financials, borders between rows, dense padding.",
+      "library": "Shadcn UI (Table)"
+    },
+    "charts": {
+      "library": "Recharts",
+      "types": [
+        "KPI Radar Chart (for ROS, OAR, SSI, DCSI, KDEP)",
+        "Sales Trend Line Chart (2019-current)",
+        "Monthly Performance Bar Chart (Target vs Achievement)"
+      ],
+      "colors": [
+        "#0F4C81",
+        "#10B981",
+        "#F59E0B",
+        "#EF4444"
+      ]
+    },
+    "cards": {
+      "style": "Flat, 1px subtle border, sharp or slightly rounded corners, white background. Hover slightly lifts and darkens border."
+    },
+    "indicators": {
+      "flags": "Use badges (Green/Amber/Red) for Performance Flags. High contrast text on light background."
+    }
+  },
+  "icons_library": "lucide-react",
+  "media": {
+    "image_urls": {
+      "login_bg": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/13f793b2-e7a6-4933-8103-560251abb736/images/a895fe9d95b57a4f9af37e01cc44ab623485b46477baeab97d7cf3d18797e625.png",
+        "description": "Abstract geometric dark blue and corporate white data nodes background, used for login page."
+      },
+      "user_portrait": {
+        "url": "https://images.unsplash.com/photo-1581065178047-8ee15951ede6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxNzV8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMHdvbWFuJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc3MzgwODczfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Professional business woman in black blazer, used for user avatar in header/sidebar."
+      },
+      "workshop_1": {
+        "url": "https://images.unsplash.com/photo-1681956961107-b0ba4261dbd4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxtb2Rlcm4lMjBhdXRvJTIwd29ya3Nob3AlMjBpbnRlcmlvcnxlbnwwfHx8fDE3NzczODA4NTd8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Auto workshop interior with car being worked on. Use as sample media in infrastructure module."
+      },
+      "showroom_1": {
+        "url": "https://images.pexels.com/photos/7144183/pexels-photo-7144183.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Modern car dealership showroom. Use as sample media in infrastructure module."
+      },
+      "company_logo": {
+        "url": "https://images.unsplash.com/photo-1760138270903-d95903188730?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzB8MHwxfHNlYXJjaHwxfHxjb21wYW55JTIwbG9nbyUyMGJsdWV8ZW58MHx8fHwxNzc3MzgwODczfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Company logo (Konica minolta proxy) to simulate Globtier logo where SVG is not used."
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build the dashboard focusing on dense, tabular data to replace the existing Excel-based workflows.",
+    "Implement Recharts for Sales Trends (line chart), Monthly Performance (bar chart), and KPIs (Radar chart).",
+    "Ensure performance flags (Green/Amber/Red) strictly follow the state colors and are clearly visible as badges or cell backgrounds in the table.",
+    "Use standard Shadcn UI components but constrain their padding to match the 'comfortable-dense' specs (e.g., h-9 inputs).",
+    "In the Group Dashboard view, include a data table for outlet-level comparison, complete with sortable headers.",
+    "Incorporate the provided media URLs for user avatars and placeholder images for the Showroom/Workshop media upload section."
+  ]
+}
