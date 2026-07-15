@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "priyabratakhandual/dealer-backend"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_NAME = "priyabratakhandual/backend-deal"
+        IMAGE_TAG  = "${BUILD_NUMBER}"
+        GITOPS_REPO = "https://github.com/priyabratakhandual/gitops.git"
     }
 
     stages {
@@ -14,23 +15,15 @@ pipeline {
             }
         }
 
-        stage('Copy .env') {
-            steps {
-                withCredentials([file(credentialsId: 'backend-env', variable: 'ENV_FILE')]) {
-                    sh '''
-                        cp "$ENV_FILE" backend/.env
-                    '''
-                }
-            }
-        }
-
         stage('Docker Login') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
                     sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                     '''
@@ -59,10 +52,72 @@ pipeline {
         stage('Push Image') {
             steps {
                 sh '''
-                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     docker push ${IMAGE_NAME}:latest
+                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
                 '''
             }
         }
+
+        stage('Create Kubernetes Secret') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'backend-env', variable: 'ENV_FILE')
+                ]) {
+                    sh '''
+                        kubectl create secret generic backend-secret \
+                          --from-env-file=$ENV_FILE \
+                          -n dealing \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                    '''
+                }
+            }
+        }
+
+        stage('Update GitOps Repository') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )
+                ]) {
+
+                    sh '''
+                        rm -rf gitops
+
+                        git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git
+
+                        cd gitops/deal
+
+                        sed -i "s/tag:.*/tag: \\"${IMAGE_TAG}\\"/" values.yaml
+
+                        git config user.name "Jenkins"
+                        git config user.email "jenkins@local"
+
+                        git add values.yaml
+
+                        git commit -m "Update backend image ${IMAGE_TAG}" || true
+
+                        git push origin master
+                    '''
+                }
+            }
+        }
+
+    }
+
+    post {
+
+        success {
+            echo "Backend deployed successfully through GitOps."
+        }
+
+        always {
+            sh '''
+                docker logout
+            '''
+        }
+
     }
 }
