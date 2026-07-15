@@ -87,7 +87,7 @@ pipeline {
                         deleteDir()
 
                         sh '''
-                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
+                            git clone -b master https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
 
                             echo "===== Current Directory ====="
                             pwd
