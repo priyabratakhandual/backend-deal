@@ -3,8 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = "priyabratakhandual/dealer-backend"
-        IMAGE_TAG  = "${BUILD_NUMBER}"
-        GITOPS_REPO = "https://github.com/priyabratakhandual/gitops.git"
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -65,7 +64,7 @@ pipeline {
                 ]) {
                     sh '''
                         kubectl create secret generic backend-secret \
-                          --from-env-file=$ENV_FILE \
+                          --from-env-file="$ENV_FILE" \
                           -n dealing \
                           --dry-run=client -o yaml | kubectl apply -f -
                     '''
@@ -83,24 +82,39 @@ pipeline {
                     )
                 ]) {
 
-                    sh '''
-                        rm -rf gitops
+                    dir('gitops') {
 
-                        git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git
+                        deleteDir()
 
-                        cd gitops/deal
+                        sh '''
+                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
 
-                        sed -i "s/tag:.*/tag: \\"${IMAGE_TAG}\\"/" values.yaml
+                            echo "===== Current Directory ====="
+                            pwd
 
-                        git config user.name "Jenkins"
-                        git config user.email "jenkins@local"
+                            echo "===== Repository Files ====="
+                            ls -la
 
-                        git add values.yaml
+                            echo "===== Repository Structure ====="
+                            find . -maxdepth 2
 
-                        git commit -m "Update backend image ${IMAGE_TAG}" || true
+                            cd deal
 
-                        git push origin master
-                    '''
+                            sed -i "s/^  tag:.*/  tag: \\"${IMAGE_TAG}\\"/" values.yaml
+
+                            echo "Updated values.yaml"
+                            grep "tag:" values.yaml
+
+                            git config user.name "Jenkins"
+                            git config user.email "jenkins@local"
+
+                            git add values.yaml
+
+                            git commit -m "Update backend image ${IMAGE_TAG}" || echo "Nothing to commit"
+
+                            git push origin master
+                        '''
+                    }
                 }
             }
         }
@@ -110,7 +124,7 @@ pipeline {
     post {
 
         success {
-            echo "Backend deployed successfully through GitOps."
+            echo "Backend image pushed and GitOps repository updated successfully."
         }
 
         always {
@@ -118,6 +132,5 @@ pipeline {
                 docker logout
             '''
         }
-
     }
 }
