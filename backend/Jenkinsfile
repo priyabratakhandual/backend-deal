@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "priyabratakhandual/backend-deal"
+        IMAGE_NAME = "priyabratakhandual/dealer-backend"
         IMAGE_TAG  = "${BUILD_NUMBER}"
         GITOPS_REPO = "https://github.com/priyabratakhandual/gitops.git"
     }
