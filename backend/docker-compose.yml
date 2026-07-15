@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  backend:
+    container_name: dealer-backend
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: priyabratakhandual/dealer-backend:latest
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports:
+      - "8000:8000"
