@@ -2,9 +2,8 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME  = "priyabratakhandual/dealer-frontend"
-        IMAGE_TAG   = "${BUILD_NUMBER}"
-        GITOPS_REPO = "https://github.com/priyabratakhandual/gitops.git"
+        IMAGE_NAME = "priyabratakhandual/dealer-backend"
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -12,18 +11,6 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-            }
-        }
-
-        stage('Copy .env') {
-            steps {
-                withCredentials([
-                    file(credentialsId: 'frontend-env', variable: 'ENV_FILE')
-                ]) {
-                    sh '''
-                        cp "$ENV_FILE" frontend/.env
-                    '''
-                }
             }
         }
 
@@ -45,7 +32,7 @@ pipeline {
 
         stage('Build Image') {
             steps {
-                dir('frontend') {
+                dir('backend') {
                     sh '''
                         docker-compose build
                     '''
@@ -73,11 +60,11 @@ pipeline {
         stage('Create Kubernetes Secret') {
             steps {
                 withCredentials([
-                    file(credentialsId: 'frontend-env', variable: 'ENV_FILE')
+                    file(credentialsId: 'backend-env', variable: 'ENV_FILE')
                 ]) {
                     sh '''
-                        kubectl create secret generic frontend-secret \
-                          --from-env-file=$ENV_FILE \
+                        kubectl create secret generic backend-secret \
+                          --from-env-file="$ENV_FILE" \
                           -n dealing \
                           --dry-run=client -o yaml | kubectl apply -f -
                     '''
@@ -96,21 +83,34 @@ pipeline {
                 ]) {
 
                     dir('gitops') {
+
                         deleteDir()
 
                         sh '''
-                            git clone -b master https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
+                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
 
-                            cd frontend
+                            echo "===== Current Directory ====="
+                            pwd
 
-                            sed -i "s/tag:.*/tag: \\"${IMAGE_TAG}\\"/" values.yaml
+                            echo "===== Repository Files ====="
+                            ls -la
+
+                            echo "===== Repository Structure ====="
+                            find . -maxdepth 2
+
+                            cd deal
+
+                            sed -i "s/^  tag:.*/  tag: \\"${IMAGE_TAG}\\"/" values.yaml
+
+                            echo "Updated values.yaml"
+                            grep "tag:" values.yaml
 
                             git config user.name "Jenkins"
                             git config user.email "jenkins@local"
 
                             git add values.yaml
 
-                            git commit -m "Update frontend image ${IMAGE_TAG}" || true
+                            git commit -m "Update backend image ${IMAGE_TAG}" || echo "Nothing to commit"
 
                             git push origin master
                         '''
@@ -124,12 +124,13 @@ pipeline {
     post {
 
         success {
-            echo "Frontend deployed successfully through GitOps."
+            echo "Backend image pushed and GitOps repository updated successfully."
         }
 
         always {
-            sh 'docker logout'
+            sh '''
+                docker logout
+            '''
         }
-
     }
 }
