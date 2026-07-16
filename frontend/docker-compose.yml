@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: priyabratakhandual/dealer-frontend:latest
+
+    container_name: dealer-frontend
+
+    ports:
+      - "3000:3000"
+
+    env_file:
+      - .env
