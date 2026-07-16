@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "priyabratakhandual/dealer-frontend"
-        IMAGE_TAG  = "${BUILD_NUMBER}"
+        IMAGE_NAME  = "priyabratakhandual/dealer-frontend"
+        IMAGE_TAG   = "${BUILD_NUMBER}"
+        GITOPS_REPO = "https://github.com/priyabratakhandual/gitops.git"
     }
 
     stages {
@@ -69,18 +70,66 @@ pipeline {
             }
         }
 
+        stage('Create Kubernetes Secret') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'frontend-env', variable: 'ENV_FILE')
+                ]) {
+                    sh '''
+                        kubectl create secret generic frontend-secret \
+                          --from-env-file=$ENV_FILE \
+                          -n dealing \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                    '''
+                }
+            }
+        }
+
+        stage('Update GitOps Repository') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'github-token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )
+                ]) {
+
+                    dir('gitops') {
+                        deleteDir()
+
+                        sh '''
+                            git clone -b master https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
+
+                            cd frontend
+
+                            sed -i "s/tag:.*/tag: \\"${IMAGE_TAG}\\"/" values.yaml
+
+                            git config user.name "Jenkins"
+                            git config user.email "jenkins@local"
+
+                            git add values.yaml
+
+                            git commit -m "Update frontend image ${IMAGE_TAG}" || true
+
+                            git push origin master
+                        '''
+                    }
+                }
+            }
+        }
+
     }
 
     post {
 
         success {
-            echo "Frontend Docker image pushed successfully."
+            echo "Frontend deployed successfully through GitOps."
         }
 
         always {
-            sh '''
-                docker logout
-            '''
+            sh 'docker logout'
         }
+
     }
 }
