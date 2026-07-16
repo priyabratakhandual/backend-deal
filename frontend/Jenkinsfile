@@ -20,9 +20,12 @@ pipeline {
                 withCredentials([
                     file(credentialsId: 'frontend-env', variable: 'ENV_FILE')
                 ]) {
-                    sh '''
-                        cp "$ENV_FILE" frontend/.env
-                    '''
+                    dir('frontend') {
+                        sh '''
+                            cp "$ENV_FILE" .env
+                            chmod 600 .env
+                        '''
+                    }
                 }
             }
         }
@@ -77,7 +80,7 @@ pipeline {
                 ]) {
                     sh '''
                         kubectl create secret generic frontend-secret \
-                          --from-env-file=$ENV_FILE \
+                          --from-env-file="$ENV_FILE" \
                           -n dealing \
                           --dry-run=client -o yaml | kubectl apply -f -
                     '''
@@ -96,10 +99,11 @@ pipeline {
                 ]) {
 
                     dir('gitops') {
+
                         deleteDir()
 
                         sh '''
-                            git clone -b master https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
+                            git clone --branch master https://${GIT_USER}:${GIT_TOKEN}@github.com/priyabratakhandual/gitops.git .
 
                             cd frontend
 
@@ -118,7 +122,6 @@ pipeline {
                 }
             }
         }
-
     }
 
     post {
@@ -130,6 +133,5 @@ pipeline {
         always {
             sh 'docker logout'
         }
-
     }
 }
