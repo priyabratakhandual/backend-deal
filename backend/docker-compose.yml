@@ -1,6 +1,6 @@
 services:
   backend:
-    container_name: dealer-backend
+    #container_name: dealer-backend
     build:
       context: .
       dockerfile: Dockerfile
