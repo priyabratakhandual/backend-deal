@@ -23,9 +23,9 @@ pipeline {
 
     stages {
 
-        // =====================================================
-        // 1. CHECKOUT SOURCE CODE
-        // =====================================================
+        // ==========================================
+        // 1. CHECKOUT
+        // ==========================================
 
         stage('Checkout') {
             steps {
@@ -33,98 +33,92 @@ pipeline {
 
                 script {
                     writeFile file: env.LOG_FILE,
-                             text: '===== JENKINS PIPELINE STARTED =====\n'
+                        text: '===== CURRENT BUILD LOG =====\n'
 
                     writeFile file: env.FAILURE_FILE,
-                             text: '===== CURRENT BUILD COMMAND OUTPUT =====\n'
+                        text: '===== ORIGINAL FAILURE OUTPUT =====\n'
                 }
 
                 checkout scm
 
-                sh '''
-                    #!/bin/bash
-                    set -euo pipefail
+                sh(script: '''#!/bin/bash
+set -Eeuo pipefail
 
-                    LOG="$WORKSPACE/$LOG_FILE"
+LOG="$WORKSPACE/$LOG_FILE"
 
-                    {
-                        echo ""
-                        echo "========== CHECKOUT INFORMATION =========="
-                        echo "Build: $BUILD_NUMBER"
-                        echo "Build URL: $BUILD_URL"
-                        echo "Workspace: $WORKSPACE"
-                        echo "Date: $(date -Is)"
-                        echo ""
-                        echo "========== REPOSITORY STRUCTURE =========="
+{
+    echo "========== CHECKOUT =========="
+    echo "Build: $BUILD_NUMBER"
+    echo "Build URL: $BUILD_URL"
+    echo "Workspace: $WORKSPACE"
+    echo "Time: $(date -Is)"
 
-                        pwd
-                        ls -la
+    echo "========== REPOSITORY ROOT =========="
+    pwd
+    ls -la
 
-                        echo ""
-                        echo "========== BACKEND FILES =========="
+    echo "========== APPLICATION DIRECTORY =========="
 
-                        ls -la "$APP_DIR"
+    if [ -d "$APP_DIR" ]; then
+        ls -la "$APP_DIR"
+    else
+        echo "ERROR: Application directory not found: $APP_DIR"
+    fi
 
-                    } 2>&1 | tee -a "$LOG"
-                '''
+} 2>&1 | tee -a "$LOG"
+''')
             }
         }
 
-        // =====================================================
-        // 2. VALIDATE REPOSITORY STRUCTURE
-        // =====================================================
+        // ==========================================
+        // 2. VALIDATE SOURCE CODE
+        // ==========================================
 
         stage('Validate Source Code') {
             steps {
-                sh '''
-                    #!/bin/bash
-                    set -euo pipefail
+                sh(script: '''#!/bin/bash
+set -Eeuo pipefail
 
-                    LOG="$WORKSPACE/$LOG_FILE"
-                    FAILURE="$WORKSPACE/$FAILURE_FILE"
+LOG="$WORKSPACE/$LOG_FILE"
+FAILURE="$WORKSPACE/$FAILURE_FILE"
 
-                    echo "===== VALIDATING SOURCE FILES =====" | tee -a "$LOG"
+check_file() {
+    local file="$1"
 
-                    REQUIRED_FILES=(
-                        "$APP_DIR/Jenkinsfile"
-                        "$APP_DIR/Dockerfile"
-                        "$APP_DIR/docker-compose.yml"
-                        "$APP_DIR/requirements.txt"
-                    )
+    if [ ! -f "$file" ]; then
+        echo "ERROR: Required file missing: $file" \
+            | tee -a "$LOG" "$FAILURE"
+        return 1
+    fi
 
-                    for FILE in "${REQUIRED_FILES[@]}"; do
+    echo "FOUND: $file" | tee -a "$LOG"
+}
 
-                        if [ ! -f "$FILE" ]; then
+echo "========== SOURCE VALIDATION ==========" | tee -a "$LOG"
 
-                            MESSAGE="ERROR: Required file missing: $FILE"
+check_file "$APP_DIR/Jenkinsfile"
+check_file "$APP_DIR/Dockerfile"
+check_file "$APP_DIR/docker-compose.yml"
+check_file "$APP_DIR/requirements.txt"
 
-                            echo "$MESSAGE" | tee -a "$LOG" "$FAILURE"
+if [ ! -f "$APP_DIR/server.py" ]; then
+    echo "WARNING: server.py not found. Verify your FastAPI entry point." \
+        | tee -a "$LOG"
+fi
 
-                            exit 1
-                        fi
+if [ ! -f "$APP_DIR/.dockerignore" ]; then
+    echo "WARNING: .dockerignore missing. Ensure .env is excluded from Docker build context." \
+        | tee -a "$LOG"
+fi
 
-                        echo "FOUND: $FILE" | tee -a "$LOG"
-
-                    done
-
-                    if [ ! -f "$APP_DIR/server.py" ]; then
-                        echo "WARNING: server.py not found. Check your application entry point." \
-                            | tee -a "$LOG"
-                    fi
-
-                    if [ ! -f "$APP_DIR/.dockerignore" ]; then
-                        echo "WARNING: .dockerignore is missing. Make sure .env is excluded from the Docker build context." \
-                            | tee -a "$LOG"
-                    fi
-
-                    echo "Source file validation successful." | tee -a "$LOG"
-                '''
+echo "Source validation passed." | tee -a "$LOG"
+''')
             }
         }
 
-        // =====================================================
-        // 3. PREPARE ENVIRONMENT FILE
-        // =====================================================
+        // ==========================================
+        // 3. PREPARE ENVIRONMENT
+        // ==========================================
 
         stage('Prepare Environment') {
             steps {
@@ -135,331 +129,328 @@ pipeline {
                     )
                 ]) {
 
-                    sh '''
-                        #!/bin/bash
-                        set -euo pipefail
+                    sh(script: '''#!/bin/bash
+set -Eeuo pipefail
 
-                        LOG="$WORKSPACE/$LOG_FILE"
-                        FAILURE="$WORKSPACE/$FAILURE_FILE"
+LOG="$WORKSPACE/$LOG_FILE"
+FAILURE="$WORKSPACE/$FAILURE_FILE"
 
-                        echo "===== PREPARING ENVIRONMENT =====" | tee -a "$LOG"
+echo "========== PREPARING ENVIRONMENT ==========" | tee -a "$LOG"
 
-                        if [ ! -f "$ENV_FILE" ]; then
+if [ ! -f "$ENV_FILE" ]; then
+    echo "ERROR: Jenkins credential backend-env is unavailable." \
+        | tee -a "$LOG" "$FAILURE"
+    exit 1
+fi
 
-                            echo "ERROR: Jenkins credential backend-env was not found." \
-                                | tee -a "$LOG" "$FAILURE"
+install -m 600 "$ENV_FILE" "$WORKSPACE/$APP_DIR/.env"
 
-                            exit 1
-                        fi
-
-                        install -m 600 "$ENV_FILE" "$APP_DIR/.env"
-
-                        echo "Environment file installed successfully." | tee -a "$LOG"
-                        echo "Environment values are not printed." | tee -a "$LOG"
-                    '''
+echo "Environment file installed successfully." | tee -a "$LOG"
+echo "Environment values are not printed." | tee -a "$LOG"
+''')
                 }
             }
         }
 
-        // =====================================================
-        // 4. BUILD, TEST, DEPLOY AND VERIFY
-        // =====================================================
+        // ==========================================
+        // 4. BUILD, DEPLOY AND VERIFY
+        // ==========================================
 
         stage('Build Deploy and Verify') {
 
             steps {
                 dir("${APP_DIR}") {
 
-                    sh '''
-                        #!/bin/bash
-                        set -Eeuo pipefail
+                    sh(script: '''#!/bin/bash
+set -Eeuo pipefail
 
-                        LOG="$WORKSPACE/$LOG_FILE"
-                        FAILURE="$WORKSPACE/$FAILURE_FILE"
+LOG="$WORKSPACE/$LOG_FILE"
+FAILURE="$WORKSPACE/$FAILURE_FILE"
 
-                        # ------------------------------------------------
-                        # Capture complete command output and exit status
-                        # ------------------------------------------------
+# ------------------------------------------
+# LOG COMMAND OUTPUT AND PRESERVE EXIT CODE
+# ------------------------------------------
 
-                        run_logged() {
+run_logged() {
 
-                            LABEL="$1"
-                            shift
+    local label="$1"
+    shift
 
-                            {
-                                echo ""
-                                echo "================================================"
-                                echo "RUNNING: $LABEL"
-                                echo "COMMAND: $*"
-                                echo "TIME: $(date -Is)"
-                                echo "================================================"
-                            } | tee -a "$LOG" "$FAILURE"
+    {
+        echo ""
+        echo "=========================================="
+        echo "STAGE COMMAND: $label"
+        echo "COMMAND: $*"
+        echo "TIME: $(date -Is)"
+        echo "=========================================="
 
-                            "$@" 2>&1 | tee -a "$LOG" "$FAILURE"
+    } | tee -a "$LOG"
 
-                            COMMAND_RC=${PIPESTATUS[0]}
+    set +e
 
-                            if [ "$COMMAND_RC" -ne 0 ]; then
+    "$@" 2>&1 | tee -a "$LOG" "$FAILURE"
 
-                                {
-                                    echo ""
-                                    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                                    echo "FIRST FAILED COMMAND: $LABEL"
-                                    echo "COMMAND: $*"
-                                    echo "EXIT CODE: $COMMAND_RC"
-                                    echo "TIME: $(date -Is)"
-                                    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                                } | tee -a "$LOG" "$FAILURE"
+    local command_rc=${PIPESTATUS[0]}
 
-                                return "$COMMAND_RC"
-                            fi
+    set -e
 
-                            echo "SUCCESS: $LABEL" | tee -a "$LOG"
+    if [ "$command_rc" -ne 0 ]; then
 
-                            return 0
-                        }
+        {
+            echo ""
+            echo "========== FIRST FAILED COMMAND =========="
+            echo "COMMAND LABEL: $label"
+            echo "COMMAND: $*"
+            echo "EXIT CODE: $command_rc"
+            echo "TIME: $(date -Is)"
+            echo "=========================================="
 
-                        # ------------------------------------------------
-                        # Docker and Compose availability
-                        # ------------------------------------------------
+        } | tee -a "$LOG" "$FAILURE"
 
-                        echo "===== CHECKING DOCKER ENVIRONMENT =====" | tee -a "$LOG"
+        return "$command_rc"
+    fi
 
-                        run_logged "Docker version" docker --version || exit $?
+    echo "SUCCESS: $label" | tee -a "$LOG"
 
-                        run_logged "Docker Compose version" docker compose version || exit $?
+    return 0
+}
 
-                        # ------------------------------------------------
-                        # Check environment and Compose files
-                        # ------------------------------------------------
+# ------------------------------------------
+# CHECK DOCKER
+# ------------------------------------------
 
-                        if [ ! -f .env ]; then
+echo "========== DOCKER ENVIRONMENT ==========" | tee -a "$LOG"
 
-                            echo "ERROR: .env file is missing." | tee -a "$LOG" "$FAILURE"
+run_logged "Docker version" docker --version || exit $?
 
-                            exit 1
-                        fi
+run_logged "Docker Compose version" docker compose version || exit $?
 
-                        if [ ! -f docker-compose.yml ]; then
+# ------------------------------------------
+# CHECK REQUIRED FILES
+# ------------------------------------------
 
-                            echo "ERROR: docker-compose.yml is missing." | tee -a "$LOG" "$FAILURE"
+if [ ! -f .env ]; then
+    echo "ERROR: .env file is missing." | tee -a "$LOG" "$FAILURE"
+    exit 1
+fi
 
-                            exit 1
-                        fi
+if [ ! -f docker-compose.yml ]; then
+    echo "ERROR: docker-compose.yml is missing." | tee -a "$LOG" "$FAILURE"
+    exit 1
+fi
 
-                        if [ ! -f Dockerfile ]; then
+if [ ! -f Dockerfile ]; then
+    echo "ERROR: Dockerfile is missing." | tee -a "$LOG" "$FAILURE"
+    exit 1
+fi
 
-                            echo "ERROR: Dockerfile is missing." | tee -a "$LOG" "$FAILURE"
+# ------------------------------------------
+# DOCKER COMPOSE VALIDATION
+# ------------------------------------------
 
-                            exit 1
-                        fi
+run_logged \
+    "Docker Compose configuration validation" \
+    docker compose config -q || exit $?
 
-                        # ------------------------------------------------
-                        # Docker Compose YAML and configuration validation
-                        # ------------------------------------------------
+# ------------------------------------------
+# DOCKER IMAGE BUILD
+# ------------------------------------------
 
-                        run_logged \
-                            "Docker Compose YAML and configuration validation" \
-                            docker compose config -q || exit $?
+run_logged \
+    "Docker image build" \
+    docker compose build || exit $?
 
-                        echo "Docker Compose configuration is valid." | tee -a "$LOG"
+# ------------------------------------------
+# VERIFY IMAGE
+# ------------------------------------------
 
-                        # ------------------------------------------------
-                        # Dockerfile and image build
-                        # ------------------------------------------------
+run_logged \
+    "Verify built Docker image" \
+    docker image inspect "$IMAGE_NAME:latest" || exit $?
 
-                        run_logged \
-                            "Docker image build" \
-                            docker compose build || exit $?
+# ------------------------------------------
+# PYTHON SYNTAX VALIDATION
+# ------------------------------------------
 
-                        # ------------------------------------------------
-                        # Verify expected image
-                        # ------------------------------------------------
+run_logged \
+    "Python syntax compilation" \
+    docker compose run --rm --no-deps backend \
+    python -m compileall -q . || exit $?
 
-                        run_logged \
-                            "Docker image inspection" \
-                            docker image inspect "$IMAGE_NAME:latest" || exit $?
+# ------------------------------------------
+# DEPLOY APPLICATION
+# ------------------------------------------
 
-                        # ------------------------------------------------
-                        # Python syntax validation inside built image
-                        # ------------------------------------------------
+run_logged \
+    "Docker Compose deployment" \
+    docker compose up -d --no-build --force-recreate || exit $?
 
-                        run_logged \
-                            "Python application syntax validation" \
-                            docker compose run --rm --no-deps backend \
-                            python -m compileall -q . || exit $?
+# ------------------------------------------
+# CONTAINER STATUS
+# ------------------------------------------
 
-                        # ------------------------------------------------
-                        # Deploy application
-                        # ------------------------------------------------
+run_logged \
+    "Container status" \
+    docker compose ps -a || exit $?
 
-                        run_logged \
-                            "Docker Compose deployment" \
-                            docker compose up -d --no-build --force-recreate || exit $?
+# ------------------------------------------
+# API HEALTH CHECK
+# ------------------------------------------
 
-                        # ------------------------------------------------
-                        # Container status
-                        # ------------------------------------------------
+echo "========== API HEALTH CHECK ==========" | tee -a "$LOG"
 
-                        run_logged \
-                            "Docker Compose container status" \
-                            docker compose ps -a || exit $?
+attempt=1
+max_attempts=12
+health_ok=false
 
-                        # ------------------------------------------------
-                        # API health check
-                        # ------------------------------------------------
+while [ "$attempt" -le "$max_attempts" ]; do
 
-                        echo "" | tee -a "$LOG"
-                        echo "===== API HEALTH CHECK =====" | tee -a "$LOG"
+    echo "Health check attempt $attempt/$max_attempts" \
+        | tee -a "$LOG"
 
-                        ATTEMPT=1
-                        MAX_ATTEMPTS=12
-                        HEALTH_SUCCESS=false
+    set +e
 
-                        while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+    curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        "$HEALTH_URL" \
+        -o /dev/null 2>&1 | tee -a "$LOG" "$FAILURE"
 
-                            echo "Health check attempt $ATTEMPT/$MAX_ATTEMPTS" \
-                                | tee -a "$LOG"
+    curl_rc=${PIPESTATUS[0]}
 
-                            if curl \
-                                --fail \
-                                --silent \
-                                --show-error \
-                                --max-time 5 \
-                                "$HEALTH_URL" \
-                                -o /dev/null >> "$LOG" 2>&1; then
+    set -e
 
-                                echo "SUCCESS: API health check passed." | tee -a "$LOG"
+    if [ "$curl_rc" -eq 0 ]; then
 
-                                HEALTH_SUCCESS=true
-                                break
-                            fi
+        health_ok=true
 
-                            echo "Health check attempt $ATTEMPT failed." \
-                                | tee -a "$LOG"
+        echo "SUCCESS: API health check passed." | tee -a "$LOG"
 
-                            ATTEMPT=$((ATTEMPT + 1))
+        break
+    fi
 
-                            sleep 5
+    attempt=$((attempt + 1))
 
-                        done
+    sleep 5
 
-                        if [ "$HEALTH_SUCCESS" != "true" ]; then
+done
 
-                            echo "ERROR: API health check failed: $HEALTH_URL" \
-                                | tee -a "$LOG" "$FAILURE"
+if [ "$health_ok" != "true" ]; then
 
-                            echo "Collecting container diagnostics..." | tee -a "$LOG" "$FAILURE"
+    echo "ERROR: API health check failed." | tee -a "$LOG" "$FAILURE"
 
-                            {
-                                echo "========== CONTAINER STATUS =========="
-                                docker compose ps -a
+    {
+        echo "========== CONTAINER STATUS =========="
+        docker compose ps -a
 
-                                echo "========== BACKEND CONTAINER LOGS =========="
-                                docker compose logs --tail=200 backend
+        echo "========== BACKEND SERVICE LOGS =========="
+        docker compose logs --tail=200 backend
 
-                                echo "========== DIRECT CONTAINER LOGS =========="
-                                docker logs --tail=200 "$CONTAINER_NAME"
+    } 2>&1 | tee -a "$LOG" "$FAILURE" || true
 
-                            } 2>&1 | tee -a "$LOG" "$FAILURE" || true
+    exit 1
+fi
 
-                            exit 1
-                        fi
+echo "========== DEPLOYMENT SUCCESSFUL ==========" | tee -a "$LOG"
 
-                        echo "" | tee -a "$LOG"
-                        echo "========== DEPLOYMENT SUCCESSFUL ==========" | tee -a "$LOG"
-                        echo "Image: $IMAGE_NAME:latest" | tee -a "$LOG"
-                        echo "Container: $CONTAINER_NAME" | tee -a "$LOG"
-                        echo "Health URL: $HEALTH_URL" | tee -a "$LOG"
+echo "Image: $IMAGE_NAME:latest" | tee -a "$LOG"
+echo "Container: $CONTAINER_NAME" | tee -a "$LOG"
+echo "Health URL: $HEALTH_URL" | tee -a "$LOG"
 
-                    '''
+''')
                 }
             }
         }
     }
 
-    // =========================================================
+    // ==========================================
     // POST BUILD ACTIONS
-    // =========================================================
+    // ==========================================
 
     post {
 
         success {
-            echo 'SUCCESS: Backend built, deployed and health check passed.'
+            echo 'SUCCESS: Backend deployed and health check passed.'
         }
 
         failure {
 
-            echo 'Pipeline failed. Collecting diagnostics and running Ollama analysis.'
+            echo 'Pipeline failed. Running Ollama failure analysis.'
 
-            sh '''
-                #!/bin/bash
-                set +e
+            sh(script: '''#!/bin/bash
+set +e
 
-                LOG="$WORKSPACE/$LOG_FILE"
-                FAILURE="$WORKSPACE/$FAILURE_FILE"
+LOG="$WORKSPACE/$LOG_FILE"
+FAILURE="$WORKSPACE/$FAILURE_FILE"
 
-                touch "$LOG" "$FAILURE"
+touch "$LOG" "$FAILURE"
 
-                {
-                    echo ""
-                    echo "================================================"
-                    echo "POST-FAILURE DIAGNOSTICS"
-                    echo "Build: $BUILD_NUMBER"
-                    echo "Build URL: $BUILD_URL"
-                    echo "Time: $(date -Is)"
-                    echo "================================================"
+# ==========================================
+# SECONDARY DIAGNOSTICS
+# ==========================================
 
-                    if [ -d "$WORKSPACE/$APP_DIR" ]; then
+{
+    echo ""
+    echo "========== POST-FAILURE DIAGNOSTICS =========="
 
-                        cd "$WORKSPACE/$APP_DIR"
+    echo "Build: $BUILD_NUMBER"
+    echo "Build URL: $BUILD_URL"
+    echo "Time: $(date -Is)"
 
-                        echo ""
-                        echo "========== COMPOSE VALIDATION DIAGNOSTICS =========="
+    if [ -d "$WORKSPACE/$APP_DIR" ]; then
 
-                        if [ -f docker-compose.yml ]; then
-                            docker compose config -q 2>&1
-                            echo "Diagnostic Compose exit code: $?"
-                        fi
+        cd "$WORKSPACE/$APP_DIR"
 
-                        echo ""
-                        echo "========== COMPOSE STATUS =========="
+        if [ -f docker-compose.yml ]; then
 
-                        docker compose ps -a 2>&1
+            echo ""
+            echo "========== COMPOSE REVALIDATION =========="
 
-                        echo ""
-                        echo "========== COMPOSE SERVICE LOGS =========="
+            docker compose config -q 2>&1
 
-                        docker compose logs --tail=200 backend 2>&1
+            echo "Compose diagnostic exit code: $?"
 
-                    else
+            echo ""
+            echo "========== COMPOSE STATUS =========="
 
-                        echo "Application directory unavailable during post-failure diagnostics."
+            docker compose ps -a 2>&1
 
-                    fi
+            echo ""
+            echo "========== BACKEND SERVICE LOGS =========="
 
-                    echo ""
-                    echo "========== DIRECT CONTAINER LOGS =========="
+            docker compose logs --tail=200 backend 2>&1
 
-                    docker logs --tail=200 "$CONTAINER_NAME" 2>&1
+        fi
 
-                    echo ""
-                    echo "========== DOCKER IMAGE INFORMATION =========="
+    else
 
-                    docker image inspect "$IMAGE_NAME:latest" \
-                        --format '{{.Id}} {{.Created}}' 2>&1
+        echo "Application directory unavailable during diagnostics."
 
-                    echo ""
-                    echo "========== END POST-FAILURE DIAGNOSTICS =========="
+    fi
 
-                } >> "$LOG" 2>&1
+    echo ""
+    echo "========== DIRECT CONTAINER LOGS =========="
 
-                # -------------------------------------------------
-                # Send original failure log and secondary
-                # diagnostics separately to Ollama.
-                # -------------------------------------------------
+    docker logs --tail=200 "$CONTAINER_NAME" 2>&1
 
-                python3 - "$FAILURE" "$LOG" "$OLLAMA_URL" "$OLLAMA_MODEL" "$BUILD_NUMBER" "$BUILD_URL" <<'PY'
+    echo ""
+    echo "========== DOCKER IMAGE =========="
+
+    docker image inspect "$IMAGE_NAME:latest" \
+        --format '{{.Id}} {{.Created}}' 2>&1
+
+    echo ""
+    echo "========== END SECONDARY DIAGNOSTICS =========="
+
+} >> "$LOG" 2>&1
+
+# ==========================================
+# OLLAMA FAILURE ANALYSIS
+# ==========================================
+
+python3 - "$FAILURE" "$LOG" "$OLLAMA_URL" "$OLLAMA_MODEL" "$BUILD_NUMBER" "$BUILD_URL" <<'PY'
 
 import json
 import re
@@ -476,62 +467,56 @@ build_number = sys.argv[5]
 build_url = sys.argv[6]
 
 
-def read_log(path):
+def read_text(path):
     try:
         return path.read_text(errors="replace")
     except Exception as exc:
-        return f"Unable to read {path}: {exc}"
+        return "Could not read log: " + str(exc)
 
 
-def limit_log(value, maximum=30000):
+def trim_log(value, maximum=24000):
+
     if len(value) <= maximum:
         return value
 
-    first_part = value[:12000]
-    last_part = value[-18000:]
-
     return (
-        first_part
-        + "\n\n===== MIDDLE OF LOG OMITTED =====\n\n"
-        + last_part
+        value[:9000]
+        + chr(10)
+        + "[MIDDLE OF LOG OMITTED]"
+        + chr(10)
+        + value[-15000:]
     )
 
 
 def redact(value):
 
-    # Common password, token and API-key assignments.
     value = re.sub(
-        r'(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key)'
-        r'(\\s*[=:]\\s*|\\s+)[^\\s,;]+',
-        r'\\1\\2[REDACTED]',
+        r"(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key)([ \t]*[=:][ \t]*|[ \t]+)[^ \t,;]+",
+        r"\1\2[REDACTED]",
         value
     )
 
-    # Database connection passwords.
     value = re.sub(
-        r'(?i)(postgres(?:ql)?://[^:\\s]+:)[^@\\s]+(@)',
-        r'\\1[REDACTED]\\2',
+        r"(?i)(postgres(?:ql)?://[^: \t]+:)[^@ \t]+(@)",
+        r"\1[REDACTED]\2",
         value
     )
 
-    # AWS access key IDs.
     value = re.sub(
-        r'AKIA[0-9A-Z]{16}',
-        '[REDACTED_AWS_ACCESS_KEY]',
+        r"AKIA[0-9A-Z]{16}",
+        "[REDACTED_AWS_ACCESS_KEY]",
         value
     )
 
-    # GitHub tokens.
     value = re.sub(
-        r'\\bgh[pousr]_[A-Za-z0-9_]{20,}\\b',
-        '[REDACTED_GITHUB_TOKEN]',
+        r"gh[pousr]_[A-Za-z0-9_]{20,}",
+        "[REDACTED_GITHUB_TOKEN]",
         value
     )
 
-    # SendGrid tokens.
     value = re.sub(
-        r'\\bSG\\.[A-Za-z0-9_-]{20,}\\b',
-        '[REDACTED_SENDGRID_TOKEN]',
+        r"SG\.[A-Za-z0-9_-]{20,}",
+        "[REDACTED_SENDGRID_TOKEN]",
         value
     )
 
@@ -541,131 +526,126 @@ def redact(value):
 try:
 
     original_failure = redact(
-        limit_log(read_log(failure_path))
+        trim_log(read_text(failure_path))
     )
 
-    secondary_diagnostics = redact(
-        limit_log(read_log(log_path)[-18000:], 18000)
+    secondary = redact(
+        trim_log(read_text(log_path)[-16000:], 16000)
     )
 
     prompt = f"""
-You are a senior DevOps engineer and expert software troubleshooting assistant.
+You are an expert DevOps troubleshooting engineer.
 
-You are analyzing a failed Jenkins pipeline that builds and deploys
-a FastAPI application using Docker, Docker Compose and a Dockerfile.
+Analyze Jenkins build {build_number}.
 
-CURRENT BUILD:
-{build_number}
-
-BUILD URL:
+Build URL:
 {build_url}
 
-EXPECTED IMAGE:
-dealer-backend:latest
+Application: FastAPI
+Deployment: Docker Compose
+Expected image: dealer-backend:latest
+Expected Compose service: backend
+Expected container: dealer-backend
 
-EXPECTED CONTAINER:
-dealer-backend
+================================================
+PRIMARY TASK
+================================================
 
-MODEL:
-{model}
+Find the FIRST REAL FAILURE in the original command output.
 
-==================================================
-YOUR MAIN OBJECTIVE
-==================================================
-
-Find the FIRST REAL FAILURE in the current Jenkins build.
-
-Do not merely summarize the logs.
-
-Identify the exact failing command, error, affected file,
-line number when available, root cause and actionable correction.
-
-==================================================
+================================================
 DIAGNOSTIC RULES
-==================================================
+================================================
 
 1. Analyze ORIGINAL FAILURE OUTPUT first.
-2. Use secondary diagnostics only to add supporting evidence.
-3. Identify the earliest failed command chronologically.
-4. Do not mistake post-failure cleanup errors for the root cause.
-5. Do not report missing containers or images as the original
-   cause if an earlier command prevented their creation.
-6. Do not claim a directory is missing unless current evidence
-   proves that the required directory is missing.
-7. Do not invent filenames, line numbers, commands or log messages.
-8. Clearly distinguish proven facts from likely explanations.
-9. If there is insufficient evidence, say so explicitly.
+2. Identify the first failed command.
+3. Quote the exact error message.
+4. Use secondary diagnostics only as supporting evidence.
+5. Do not mistake missing images, containers or directories
+   caused by an earlier failure for the root cause.
+6. Never invent filenames, line numbers or commands.
+7. Give line numbers only when logs provide them.
+8. Clearly distinguish facts from assumptions.
+9. If evidence is insufficient, say so.
 
-==================================================
-DOCKERFILE ANALYSIS
-==================================================
-
-If Docker build fails:
-
-- Identify the Dockerfile instruction that failed.
-- Identify the line number if provided by Docker.
-- Explain errors involving FROM, RUN, COPY, ADD, WORKDIR,
-  CMD, ENTRYPOINT, EXPOSE, ARG and ENV.
-- Check missing files, invalid build contexts, package
-  installation failures and dependency errors.
-- Show the corrected instruction where evidence supports it.
-
-==================================================
+================================================
 DOCKER COMPOSE ANALYSIS
-==================================================
+================================================
 
-If Docker Compose fails:
+Interpret YAML parser errors and inspect the reported line and column.
 
-- Identify the affected Compose file.
-- Inspect the reported YAML line and column.
-- Recognize unterminated quotes, indentation errors,
-  missing colons, invalid mappings and invalid values.
-- Check services, ports, volumes, networks, build contexts,
-  Dockerfile paths and environment files.
+Recognize:
 
-For example, if the log reports:
+- Unterminated quotation marks.
+- Invalid YAML indentation.
+- Missing colons.
+- Invalid mappings.
+- Incorrect port mappings.
+- Invalid volume configuration.
+- Incorrect service names.
+- Incorrect build contexts.
+- Missing Dockerfiles.
+- Environment file errors.
+- Network configuration errors.
+
+If the error says:
 
 while scanning a quoted scalar
 found unexpected end of stream
-at line 13
 
-Inspect line 13 and surrounding lines.
+Inspect the actual reported line.
 
-If the configuration contains:
+If the line contains:
 
 ports:
   - "8000:
 
-Explain that the quoted scalar is not terminated.
+Explain that the quotation is not terminated.
 
-A likely intended correction is:
+A likely correction is:
 
 ports:
   - "8000:8000"
 
-Do not claim that this exact port mapping was intended
-unless the source configuration or other evidence confirms it.
+Do not claim this exact value was intended unless evidence confirms it.
 
-==================================================
-APPLICATION CODE ANALYSIS
-==================================================
+================================================
+DOCKERFILE ANALYSIS
+================================================
 
-If application code fails:
+Identify the failing Dockerfile instruction.
 
-- Identify Python syntax errors and traceback locations.
-- Identify missing Python modules and dependencies.
-- Identify import errors.
-- Identify incorrect application entry points.
-- Identify database and Redis connection errors.
-- Identify missing environment variables.
-- Identify runtime exceptions during FastAPI startup.
-- Identify failed API health checks.
+Diagnose:
 
-Use the actual traceback and container logs as evidence.
+- Invalid Dockerfile instructions.
+- Missing COPY source files.
+- Incorrect build context.
+- Base image pull failures.
+- Package installation failures.
+- Dependency installation failures.
+- Build errors.
 
-==================================================
+================================================
+PYTHON APPLICATION ANALYSIS
+================================================
+
+Identify:
+
+- Python syntax errors.
+- Missing Python packages.
+- Import errors.
+- Incorrect application entry points.
+- Database connection failures.
+- Redis connection failures.
+- Missing environment variables.
+- FastAPI startup exceptions.
+- API health-check failures.
+
+Use actual tracebacks and container logs.
+
+================================================
 OUTPUT FORMAT
-==================================================
+================================================
 
 ROOT CAUSE:
 
@@ -673,41 +653,39 @@ FIRST FAILED STAGE:
 
 FIRST FAILED COMMAND:
 
-EXACT ERROR MESSAGE:
+EXACT ERROR:
 
 AFFECTED FILE:
 
-LINE NUMBER:
+LINE/COLUMN:
 
 WHY IT FAILED:
-
-INCORRECT CONFIGURATION OR CODE:
 
 CORRECTED CONFIGURATION OR CODE:
 
 RECOMMENDED FIX:
 
-VERIFICATION COMMANDS:
+VERIFICATION COMMAND:
 
-CONFIDENCE:
-High / Medium / Low
+CONFIDENCE: High / Medium / Low
 
-If a section cannot be determined from the logs,
-write "Not established by the available logs."
+If information cannot be established, write:
+"Not established by the available logs."
 
-Do not provide generic fixes unrelated to the actual error.
+Do not give generic fixes unrelated to the actual error.
+Never reproduce passwords, tokens or secrets.
 
-==================================================
+================================================
 ORIGINAL FAILURE OUTPUT
-==================================================
+================================================
 
 {original_failure}
 
-==================================================
+================================================
 SECONDARY DIAGNOSTICS
-==================================================
+================================================
 
-{secondary_diagnostics}
+{secondary}
 """
 
     payload = json.dumps({
@@ -723,53 +701,64 @@ SECONDARY DIAGNOSTICS
     request = urllib.request.Request(
         ollama_url.rstrip("/") + "/api/generate",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json"
+        },
         method="POST"
     )
 
     print(
-        "\n========== OLLAMA FAILURE ANALYSIS ==========\n",
+        chr(10)
+        + "========== OLLAMA FAILURE ANALYSIS =========="
+        + chr(10),
         flush=True
     )
 
     with urllib.request.urlopen(request, timeout=300) as response:
-        result = json.loads(response.read().decode("utf-8"))
 
-    analysis = result.get("response", "Ollama returned no analysis.")
-
-    print(analysis, flush=True)
+        result = json.loads(
+            response.read().decode("utf-8")
+        )
 
     print(
-        "\n========== END OLLAMA ANALYSIS ==========\n",
+        result.get("response", "Ollama returned no analysis."),
+        flush=True
+    )
+
+    print(
+        chr(10)
+        + "========== END OLLAMA ANALYSIS =========="
+        + chr(10),
         flush=True
     )
 
 except Exception as exc:
 
     print(
-        f"Ollama analysis failed: {type(exc).__name__}: {exc}",
+        "Ollama analysis failed: "
+        + type(exc).__name__
+        + ": "
+        + str(exc),
         flush=True
     )
 
     print(
-        "Check the original Jenkins Console Output and archived failure.log.",
+        "Review pipeline.log and failure.log in archived artifacts.",
         flush=True
     )
 
 PY
-            '''
+''')
         }
 
         always {
 
             echo 'Cleaning temporary environment files and archiving logs.'
 
-            sh '''
-                #!/bin/bash
-                set +e
-
-                rm -f "$WORKSPACE/$APP_DIR/.env"
-            '''
+            sh(script: '''#!/bin/bash
+set +e
+rm -f "$WORKSPACE/$APP_DIR/.env"
+''')
 
             archiveArtifacts(
                 artifacts: 'pipeline.log,failure.log',
