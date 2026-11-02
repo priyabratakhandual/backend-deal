@@ -1,6 +1,6 @@
 services:
-  backend:
-    container_name: dealer-backend
+  #backend:
+    #container_name: dealer-backend
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,4 +10,4 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:
+      - "8000:8000"
