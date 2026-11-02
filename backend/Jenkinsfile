@@ -502,15 +502,15 @@ def redact(value):
     # Common password, token and API-key assignments.
     value = re.sub(
         r'(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key)'
-        r'(\s*[=:]\s*|\s+)[^\s,;]+',
-        r'\1\2[REDACTED]',
+        r'(\\s*[=:]\\s*|\\s+)[^\\s,;]+',
+        r'\\1\\2[REDACTED]',
         value
     )
 
     # Database connection passwords.
     value = re.sub(
-        r'(?i)(postgres(?:ql)?://[^:\s]+:)[^@\s]+(@)',
-        r'\1[REDACTED]\2',
+        r'(?i)(postgres(?:ql)?://[^:\\s]+:)[^@\\s]+(@)',
+        r'\\1[REDACTED]\\2',
         value
     )
 
@@ -521,15 +521,16 @@ def redact(value):
         value
     )
 
-    # Common GitHub and SendGrid token formats.
+    # GitHub tokens.
     value = re.sub(
-        r'\bgh[pousr]_[A-Za-z0-9_]{20,}\b',
+        r'\\bgh[pousr]_[A-Za-z0-9_]{20,}\\b',
         '[REDACTED_GITHUB_TOKEN]',
         value
     )
 
+    # SendGrid tokens.
     value = re.sub(
-        r'\bSG\.[A-Za-z0-9_-]{20,}\b',
+        r'\\bSG\\.[A-Za-z0-9_-]{20,}\\b',
         '[REDACTED_SENDGRID_TOKEN]',
         value
     )
