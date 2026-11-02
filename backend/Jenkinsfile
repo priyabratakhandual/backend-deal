@@ -515,7 +515,7 @@ def redact(value):
     )
 
     value = re.sub(
-        r"SG\.[A-Za-z0-9_-]{20,}",
+        r"SG[.][A-Za-z0-9_-]{20,}",
         "[REDACTED_SENDGRID_TOKEN]",
         value
     )
