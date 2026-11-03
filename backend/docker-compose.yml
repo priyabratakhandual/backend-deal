@@ -1,4 +1,4 @@
-#services:
+services:
   backend:
     container_name: dealer-backend
     build:
