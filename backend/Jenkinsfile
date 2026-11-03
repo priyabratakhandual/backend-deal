@@ -31,9 +31,12 @@ pipeline {
                 script {
                     deleteDir()
 
+                    // Use a normal newline. No System.lineSeparator()
+                    // is required or needs Jenkins script approval.
+
                     writeFile(
                         file: 'pipeline.log',
-                        text: "Jenkins pipeline started: ${env.BUILD_TAG}" + System.lineSeparator()
+                        text: "Jenkins pipeline started: ${env.BUILD_TAG}\n"
                     )
 
                     writeFile(
@@ -118,7 +121,11 @@ ERROR: ${err.getMessage()}
 
                     cd "$WORKSPACE"
 
-                    for file in backend/Jenkinsfile backend/Dockerfile backend/docker-compose.yml backend/requirements.txt
+                    for file in \
+                        backend/Jenkinsfile \
+                        backend/Dockerfile \
+                        backend/docker-compose.yml \
+                        backend/requirements.txt
                     do
                         if [ -f "$file" ]; then
                             echo "FOUND: $file" | tee -a "$LOG"
@@ -223,7 +230,10 @@ ERROR: ${err.getMessage()}
 
                         echo "========== DOCKER ENVIRONMENT ==========" | tee -a "$LOG"
 
-                        # Record commands and preserve the first failure.
+                        # ------------------------------------------------
+                        # Execute commands and record their exit codes.
+                        # Preserve only the first failed command.
+                        # ------------------------------------------------
 
                         run_logged() {
 
@@ -261,7 +271,9 @@ ERROR: ${err.getMessage()}
                                         echo "EXIT CODE: $command_rc"
                                         echo "TIME: $(date -Is)"
                                         echo "========== ORIGINAL ERROR OUTPUT =========="
+
                                         cat "$output_file"
+
                                         echo "=========================================="
                                     } >> "$FAILURE"
                                 fi
@@ -284,29 +296,46 @@ ERROR: ${err.getMessage()}
 
                         run_logged "Docker Compose version" docker compose version
 
-                        # Compose validation
+                        # Validate Compose configuration
 
-                        run_logged "Docker Compose configuration validation" docker compose config -q
+                        run_logged \
+                            "Docker Compose configuration validation" \
+                            docker compose config -q
 
                         # Build image
 
-                        run_logged "Docker image build" docker compose build
+                        run_logged \
+                            "Docker image build" \
+                            docker compose build
 
                         # Inspect image
 
-                        run_logged "Docker image inspection" docker image inspect "$IMAGE_NAME"
+                        run_logged \
+                            "Docker image inspection" \
+                            docker image inspect "$IMAGE_NAME"
 
                         # Python syntax validation
 
-                        run_logged "Python syntax validation" docker compose run --rm --no-deps --entrypoint python backend -m compileall -q .
+                        run_logged \
+                            "Python syntax validation" \
+                            docker compose run \
+                                --rm \
+                                --no-deps \
+                                --entrypoint python \
+                                backend \
+                                -m compileall -q .
 
                         # Deploy application
 
-                        run_logged "Docker Compose deployment" docker compose up -d --no-build --force-recreate
+                        run_logged \
+                            "Docker Compose deployment" \
+                            docker compose up -d --no-build --force-recreate
 
                         # Container status
 
-                        run_logged "Docker Compose container status" docker compose ps -a
+                        run_logged \
+                            "Docker Compose container status" \
+                            docker compose ps -a
 
                         # API health check
 
@@ -320,7 +349,11 @@ ERROR: ${err.getMessage()}
 
                                 echo "Health check attempt: $attempt/12"
 
-                                if curl -fsS --connect-timeout 5 --max-time 10 "$HEALTH_URL" -o /dev/null; then
+                                if curl -fsS \
+                                    --connect-timeout 5 \
+                                    --max-time 10 \
+                                    "$HEALTH_URL" \
+                                    -o /dev/null; then
 
                                     echo "API health check successful."
                                     return 0
@@ -403,7 +436,8 @@ ERROR: ${err.getMessage()}
                     echo ""
                     echo "========== DOCKER IMAGE INSPECTION =========="
 
-                    docker image inspect "$IMAGE_NAME" --format 'Image ID: {{.Id}}
+                    docker image inspect "$IMAGE_NAME" \
+                        --format 'Image ID: {{.Id}}
 Image CMD: {{json .Config.Cmd}}
 Image ENTRYPOINT: {{json .Config.Entrypoint}}
 Working Directory: {{.Config.WorkingDir}}
@@ -412,7 +446,8 @@ User: {{.Config.User}}'
                     echo ""
                     echo "========== CONTAINER INSPECTION =========="
 
-                    docker inspect "$CONTAINER_NAME" --format 'Container: {{.Name}}
+                    docker inspect "$CONTAINER_NAME" \
+                        --format 'Container: {{.Name}}
 Status: {{.State.Status}}
 Running: {{.State.Running}}
 Exit Code: {{.State.ExitCode}}
@@ -427,7 +462,9 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                     echo ""
                     echo "========== DOCKER COMPOSE STATUS =========="
 
-                    docker compose -f "$WORKSPACE/backend/docker-compose.yml" ps -a
+                    docker compose \
+                        -f "$WORKSPACE/backend/docker-compose.yml" \
+                        ps -a
 
                     echo ""
                     echo "========== CONTAINER LOGS =========="
@@ -464,7 +501,11 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                     echo ""
                     echo "========== API HEALTH ENDPOINT =========="
 
-                    curl -v --connect-timeout 5 --max-time 10 "$HEALTH_URL" -o /dev/null
+                    curl -v \
+                        --connect-timeout 5 \
+                        --max-time 10 \
+                        "$HEALTH_URL" \
+                        -o /dev/null
 
                 } >> "$DIAG" 2>&1
 
@@ -472,7 +513,12 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                 # 4. Ollama analysis
                 # ------------------------------------------------
 
-                OLLAMA_URL="$OLLAMA_URL" OLLAMA_MODEL="$OLLAMA_MODEL" FAILURE_LOG="$FAILURE" DIAGNOSTICS_FILE="$DIAG" WORKSPACE_DIR="$WORKSPACE" python3 - <<'PY' 2>&1 | tee -a "$LOG"
+                OLLAMA_URL="$OLLAMA_URL" \
+                OLLAMA_MODEL="$OLLAMA_MODEL" \
+                FAILURE_LOG="$FAILURE" \
+                DIAGNOSTICS_FILE="$DIAG" \
+                WORKSPACE_DIR="$WORKSPACE" \
+                python3 - <<'PY' 2>&1 | tee -a "$LOG"
 
 import os
 import re
@@ -505,8 +551,8 @@ def read_file(path, limit=30000):
 
 # ------------------------------------------------------------
 # Secret redaction
-# No backslash escapes are used in these regex patterns.
-# This avoids Groovy string parsing problems.
+# Uses character classes instead of escaped backslashes
+# to avoid Groovy parsing problems.
 # ------------------------------------------------------------
 
 def redact_secrets(text):
@@ -521,6 +567,7 @@ def redact_secrets(text):
     for pattern in patterns:
 
         def replace_secret(match):
+
             if match.lastindex and match.lastindex >= 2:
                 return match.group(1) + match.group(2) + "[REDACTED]"
 
@@ -586,6 +633,8 @@ def collect_source_files(root):
         for filename in sorted(files):
 
             path = Path(current_root) / filename
+
+            # Never read environment files.
 
             if filename == ".env" or filename.startswith(".env."):
                 continue
