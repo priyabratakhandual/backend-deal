@@ -33,7 +33,7 @@ pipeline {
 
                     writeFile(
                         file: 'pipeline.log',
-                        text: "Jenkins pipeline started: ${env.BUILD_TAG}\n"
+                        text: "Jenkins pipeline started: ${env.BUILD_TAG}" + System.lineSeparator()
                     )
 
                     writeFile(
@@ -45,17 +45,15 @@ pipeline {
                         checkout scm
                     } catch (err) {
 
-                        def message = """
+                        writeFile(
+                            file: 'failure.log',
+                            text: """
 ========== FIRST FAILED COMMAND ==========
 STAGE: Checkout
 COMMAND: checkout scm
 ERROR: ${err.getMessage()}
 ==========================================
 """
-
-                        writeFile(
-                            file: 'failure.log',
-                            text: message
                         )
 
                         throw err
@@ -120,11 +118,7 @@ ERROR: ${err.getMessage()}
 
                     cd "$WORKSPACE"
 
-                    for file in \
-                        backend/Jenkinsfile \
-                        backend/Dockerfile \
-                        backend/docker-compose.yml \
-                        backend/requirements.txt
+                    for file in backend/Jenkinsfile backend/Dockerfile backend/docker-compose.yml backend/requirements.txt
                     do
                         if [ -f "$file" ]; then
                             echo "FOUND: $file" | tee -a "$LOG"
@@ -229,10 +223,7 @@ ERROR: ${err.getMessage()}
 
                         echo "========== DOCKER ENVIRONMENT ==========" | tee -a "$LOG"
 
-                        # ------------------------------------------------
-                        # Run and record commands.
-                        # Only the first failure is saved in failure.log.
-                        # ------------------------------------------------
+                        # Record commands and preserve the first failure.
 
                         run_logged() {
 
@@ -262,7 +253,6 @@ ERROR: ${err.getMessage()}
                             if [ "$command_rc" -ne 0 ]; then
 
                                 if [ ! -s "$FAILURE" ]; then
-
                                     {
                                         echo ""
                                         echo "========== FIRST FAILED COMMAND =========="
@@ -271,11 +261,8 @@ ERROR: ${err.getMessage()}
                                         echo "EXIT CODE: $command_rc"
                                         echo "TIME: $(date -Is)"
                                         echo "========== ORIGINAL ERROR OUTPUT =========="
-
                                         cat "$output_file"
-
                                         echo "=========================================="
-
                                     } >> "$FAILURE"
                                 fi
 
@@ -291,70 +278,37 @@ ERROR: ${err.getMessage()}
                             rm -f "$output_file"
                         }
 
-                        # ------------------------------------------------
                         # Docker availability
-                        # ------------------------------------------------
 
                         run_logged "Docker version" docker --version
 
                         run_logged "Docker Compose version" docker compose version
 
-                        # ------------------------------------------------
-                        # Validate Compose configuration
-                        # ------------------------------------------------
+                        # Compose validation
 
-                        run_logged \
-                            "Docker Compose configuration validation" \
-                            docker compose config -q
+                        run_logged "Docker Compose configuration validation" docker compose config -q
 
-                        # ------------------------------------------------
-                        # Build Docker image
-                        # ------------------------------------------------
+                        # Build image
 
-                        run_logged \
-                            "Docker image build" \
-                            docker compose build
+                        run_logged "Docker image build" docker compose build
 
-                        # ------------------------------------------------
-                        # Inspect Docker image
-                        # ------------------------------------------------
+                        # Inspect image
 
-                        run_logged \
-                            "Docker image inspection" \
-                            docker image inspect "$IMAGE_NAME"
+                        run_logged "Docker image inspection" docker image inspect "$IMAGE_NAME"
 
-                        # ------------------------------------------------
                         # Python syntax validation
-                        # ------------------------------------------------
 
-                        run_logged \
-                            "Python syntax validation" \
-                            docker compose run \
-                                --rm \
-                                --no-deps \
-                                --entrypoint python \
-                                backend \
-                                -m compileall -q .
+                        run_logged "Python syntax validation" docker compose run --rm --no-deps --entrypoint python backend -m compileall -q .
 
-                        # ------------------------------------------------
                         # Deploy application
-                        # ------------------------------------------------
 
-                        run_logged \
-                            "Docker Compose deployment" \
-                            docker compose up -d --no-build --force-recreate
+                        run_logged "Docker Compose deployment" docker compose up -d --no-build --force-recreate
 
-                        # ------------------------------------------------
                         # Container status
-                        # ------------------------------------------------
 
-                        run_logged \
-                            "Docker Compose container status" \
-                            docker compose ps -a
+                        run_logged "Docker Compose container status" docker compose ps -a
 
-                        # ------------------------------------------------
                         # API health check
-                        # ------------------------------------------------
 
                         check_health() {
 
@@ -366,11 +320,7 @@ ERROR: ${err.getMessage()}
 
                                 echo "Health check attempt: $attempt/12"
 
-                                if curl -fsS \
-                                    --connect-timeout 5 \
-                                    --max-time 10 \
-                                    "$HEALTH_URL" \
-                                    -o /dev/null; then
+                                if curl -fsS --connect-timeout 5 --max-time 10 "$HEALTH_URL" -o /dev/null; then
 
                                     echo "API health check successful."
                                     return 0
@@ -453,8 +403,7 @@ ERROR: ${err.getMessage()}
                     echo ""
                     echo "========== DOCKER IMAGE INSPECTION =========="
 
-                    docker image inspect "$IMAGE_NAME" \
-                        --format 'Image ID: {{.Id}}
+                    docker image inspect "$IMAGE_NAME" --format 'Image ID: {{.Id}}
 Image CMD: {{json .Config.Cmd}}
 Image ENTRYPOINT: {{json .Config.Entrypoint}}
 Working Directory: {{.Config.WorkingDir}}
@@ -463,8 +412,7 @@ User: {{.Config.User}}'
                     echo ""
                     echo "========== CONTAINER INSPECTION =========="
 
-                    docker inspect "$CONTAINER_NAME" \
-                        --format 'Container: {{.Name}}
+                    docker inspect "$CONTAINER_NAME" --format 'Container: {{.Name}}
 Status: {{.State.Status}}
 Running: {{.State.Running}}
 Exit Code: {{.State.ExitCode}}
@@ -479,9 +427,7 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                     echo ""
                     echo "========== DOCKER COMPOSE STATUS =========="
 
-                    docker compose \
-                        -f "$WORKSPACE/backend/docker-compose.yml" \
-                        ps -a
+                    docker compose -f "$WORKSPACE/backend/docker-compose.yml" ps -a
 
                     echo ""
                     echo "========== CONTAINER LOGS =========="
@@ -518,11 +464,7 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                     echo ""
                     echo "========== API HEALTH ENDPOINT =========="
 
-                    curl -v \
-                        --connect-timeout 5 \
-                        --max-time 10 \
-                        "$HEALTH_URL" \
-                        -o /dev/null
+                    curl -v --connect-timeout 5 --max-time 10 "$HEALTH_URL" -o /dev/null
 
                 } >> "$DIAG" 2>&1
 
@@ -530,12 +472,7 @@ Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
                 # 4. Ollama analysis
                 # ------------------------------------------------
 
-                OLLAMA_URL="$OLLAMA_URL" \
-                OLLAMA_MODEL="$OLLAMA_MODEL" \
-                FAILURE_LOG="$FAILURE" \
-                DIAGNOSTICS_FILE="$DIAG" \
-                WORKSPACE_DIR="$WORKSPACE" \
-                python3 - <<'PY' 2>&1 | tee -a "$LOG"
+                OLLAMA_URL="$OLLAMA_URL" OLLAMA_MODEL="$OLLAMA_MODEL" FAILURE_LOG="$FAILURE" DIAGNOSTICS_FILE="$DIAG" WORKSPACE_DIR="$WORKSPACE" python3 - <<'PY' 2>&1 | tee -a "$LOG"
 
 import os
 import re
@@ -568,33 +505,29 @@ def read_file(path, limit=30000):
 
 # ------------------------------------------------------------
 # Secret redaction
+# No backslash escapes are used in these regex patterns.
+# This avoids Groovy string parsing problems.
 # ------------------------------------------------------------
 
 def redact_secrets(text):
 
     patterns = [
-        (
-            r"(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization)(\s*[:=]\s*)([\"']?)[^\s,;\n\"']+",
-            r"\1\2[REDACTED]"
-        ),
-        (
-            r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+",
-            r"\1[REDACTED]"
-        ),
-        (
-            r"(?i)(AKIA)[A-Z0-9]{16}",
-            r"[REDACTED_AWS_ACCESS_KEY]"
-        ),
-        (
-            r"(?i)(://[^:/\s]+:)[^@\s]+@",
-            r"\1[REDACTED]@"
-        )
+        r"(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization)([ ]*[:=][ ]*)[^ ,;]+",
+        r"(?i)(Bearer[ ]+)[A-Za-z0-9._~+/=-]+",
+        r"(?i)(AKIA)[A-Z0-9]{16}",
+        r"(://[^:/ ]+:)[^@ ]+@"
     ]
 
-    for pattern, replacement in patterns:
-        text = re.sub(pattern, replacement, text)
+    for pattern in patterns:
 
-    # Redact PEM private key blocks.
+        def replace_secret(match):
+            if match.lastindex and match.lastindex >= 2:
+                return match.group(1) + match.group(2) + "[REDACTED]"
+
+            return "[REDACTED]"
+
+        text = re.sub(pattern, replace_secret, text)
+
     text = re.sub(
         r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
         "[REDACTED PRIVATE KEY]",
@@ -606,8 +539,8 @@ def redact_secrets(text):
 
 
 # ------------------------------------------------------------
-# Collect source files with exact line numbers.
-# Never collect .env or secret files.
+# Collect source files with line numbers.
+# Never collect .env or private key files.
 # ------------------------------------------------------------
 
 def collect_source_files(root):
@@ -654,7 +587,6 @@ def collect_source_files(root):
 
             path = Path(current_root) / filename
 
-            # Never read environment files or private key files.
             if filename == ".env" or filename.startswith(".env."):
                 continue
 
@@ -668,15 +600,17 @@ def collect_source_files(root):
                 continue
 
             if path.suffix.lower() in {
-                ".pem", ".key", ".p12", ".pfx",
-                ".crt", ".cer", ".jks"
+                ".pem",
+                ".key",
+                ".p12",
+                ".pfx",
+                ".crt",
+                ".cer",
+                ".jks"
             }:
                 continue
 
-            if (
-                filename not in allowed_files
-                and path.suffix.lower() != ".py"
-            ):
+            if filename not in allowed_files and path.suffix.lower() != ".py":
                 continue
 
             try:
@@ -686,12 +620,9 @@ def collect_source_files(root):
                     errors="replace"
                 )
 
-                numbered = "\n".join(
-                    f"{index}: {line}"
-                    for index, line in enumerate(
-                        content.splitlines(),
-                        1
-                    )
+                numbered = chr(10).join(
+                    str(index) + ": " + line
+                    for index, line in enumerate(content.splitlines(), 1)
                 )
 
                 numbered = redact_secrets(numbered)
@@ -699,20 +630,20 @@ def collect_source_files(root):
                 relative_path = path.relative_to(root)
 
                 section = (
-                    "\n========== SOURCE FILE: "
+                    chr(10)
+                    + "========== SOURCE FILE: "
                     + str(relative_path)
-                    + " ==========\n"
+                    + " =========="
+                    + chr(10)
                     + numbered
-                    + "\n"
+                    + chr(10)
                 )
 
                 remaining = max_total_chars - total_chars
 
                 if remaining <= 0:
-                    source_parts.append(
-                        "\nSOURCE COLLECTION LIMIT REACHED."
-                    )
-                    return "\n".join(source_parts)
+                    source_parts.append("SOURCE COLLECTION LIMIT REACHED.")
+                    return chr(10).join(source_parts)
 
                 section = section[:min(max_file_chars, remaining)]
 
@@ -722,22 +653,18 @@ def collect_source_files(root):
             except Exception as error:
 
                 source_parts.append(
-                    f"\nCould not read {path}: {error}\n"
+                    "Could not read " + str(path) + ": " + str(error)
                 )
 
-    return "\n".join(source_parts)
+    return chr(10).join(source_parts)
 
 
 # ------------------------------------------------------------
 # Read original failure and runtime diagnostics
 # ------------------------------------------------------------
 
-failure_log = read_file(failure_path, 12000)
-diagnostics = read_file(diagnostics_path, 30000)
-
-failure_log = redact_secrets(failure_log)
-diagnostics = redact_secrets(diagnostics)
-
+failure_log = redact_secrets(read_file(failure_path, 12000))
+diagnostics = redact_secrets(read_file(diagnostics_path, 30000))
 source_code = collect_source_files(workspace)
 
 
@@ -858,7 +785,7 @@ Investigate:
 - Restart loops.
 - Out-of-memory termination.
 
-Always inspect and compare:
+Always compare:
 
 - Expected application startup command.
 - Image CMD.
@@ -961,9 +888,7 @@ Investigate:
 - Application process not running.
 - Application not listening.
 
-Verify whether the application listens on:
-
-0.0.0.0:8000
+Verify whether the application listens on 0.0.0.0:8000.
 
 Do not assume a running container means FastAPI is running.
 
@@ -1009,13 +934,8 @@ Investigate:
 - Upstream unavailable.
 - TLS and SSL errors.
 
-Distinguish clearly between:
-
-- Connection refused.
-- Connection timeout.
-- DNS failure.
-- HTTP error response.
-- Application not listening.
+Distinguish clearly between connection refused,
+connection timeout, DNS failure and HTTP error responses.
 
 Do not recommend changing ports without evidence.
 
@@ -1129,7 +1049,7 @@ Use those numbers to report:
 - Why that line is incorrect.
 
 If the actual source does not prove a line number,
-write "Not confirmed".
+write Not confirmed.
 
 Do not infer a line number from a generic example.
 
@@ -1308,7 +1228,7 @@ PY
         }
 
         // =====================================================
-        // CLEANUP: RUN AFTER FAILURE ANALYSIS
+        // CLEANUP
         // =====================================================
 
         cleanup {
