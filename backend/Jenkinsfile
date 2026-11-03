@@ -9,18 +9,22 @@ pipeline {
     }
 
     environment {
-        APP_DIR       = 'backend'
+        APP_DIR        = 'backend'
         ENV_CREDENTIAL = 'backend-env'
 
-        IMAGE_NAME    = 'dealer-backend:latest'
+        IMAGE_NAME     = 'dealer-backend:latest'
         CONTAINER_NAME = 'dealer-backend'
-        HEALTH_URL    = 'http://127.0.0.1:8000/openapi.json'
+        HEALTH_URL     = 'http://127.0.0.1:8000/openapi.json'
 
-        OLLAMA_URL    = 'http://127.0.0.1:11434'
-        OLLAMA_MODEL  = 'qwen2.5-coder:3b'
+        OLLAMA_URL     = 'http://127.0.0.1:11434'
+        OLLAMA_MODEL   = 'qwen2.5-coder:3b'
     }
 
     stages {
+
+        // =====================================================
+        // STAGE 1: CHECKOUT
+        // =====================================================
 
         stage('Checkout') {
             steps {
@@ -40,6 +44,7 @@ pipeline {
                     try {
                         checkout scm
                     } catch (err) {
+
                         def message = """
 ========== FIRST FAILED COMMAND ==========
 STAGE: Checkout
@@ -47,14 +52,11 @@ COMMAND: checkout scm
 ERROR: ${err.getMessage()}
 ==========================================
 """
+
                         writeFile(
                             file: 'failure.log',
                             text: message
                         )
-
-                        sh """
-                            printf '%s\\n' '${message.replace("'", "'\\''")}' >> pipeline.log
-                        """
 
                         throw err
                     }
@@ -63,18 +65,30 @@ ERROR: ${err.getMessage()}
                 sh '''#!/bin/bash
                     set -e
 
-                    echo "========== CHECKOUT ==========" | tee -a "$WORKSPACE/pipeline.log"
-                    echo "Build: $BUILD_NUMBER" | tee -a "$WORKSPACE/pipeline.log"
-                    echo "Workspace: $WORKSPACE" | tee -a "$WORKSPACE/pipeline.log"
+                    LOG="$WORKSPACE/pipeline.log"
 
-                    echo "========== REPOSITORY ROOT ==========" | tee -a "$WORKSPACE/pipeline.log"
-                    ls -la "$WORKSPACE" | tee -a "$WORKSPACE/pipeline.log"
+                    echo "========== CHECKOUT ==========" | tee -a "$LOG"
+                    echo "Build: $BUILD_NUMBER" | tee -a "$LOG"
+                    echo "Workspace: $WORKSPACE" | tee -a "$LOG"
 
-                    echo "========== APPLICATION DIRECTORY ==========" | tee -a "$WORKSPACE/pipeline.log"
-                    ls -la "$WORKSPACE/backend" | tee -a "$WORKSPACE/pipeline.log"
+                    echo "========== REPOSITORY ROOT ==========" | tee -a "$LOG"
+                    ls -la "$WORKSPACE" | tee -a "$LOG"
+
+                    echo "========== APPLICATION DIRECTORY ==========" | tee -a "$LOG"
+
+                    if [ -d "$WORKSPACE/backend" ]; then
+                        ls -la "$WORKSPACE/backend" | tee -a "$LOG"
+                    else
+                        echo "ERROR: backend directory not found." | tee -a "$LOG"
+                        exit 1
+                    fi
                 '''
             }
         }
+
+        // =====================================================
+        // STAGE 2: SOURCE VALIDATION
+        // =====================================================
 
         stage('Validate Source Code') {
             steps {
@@ -89,14 +103,18 @@ ERROR: ${err.getMessage()}
                     record_failure() {
                         local message="$1"
 
-                        {
-                            echo "========== FIRST FAILED COMMAND =========="
-                            echo "STAGE: Source validation"
-                            echo "COMMAND: Source file validation"
-                            echo "ERROR: $message"
-                            echo "=========================================="
-                        } | tee -a "$LOG" "$FAILURE"
+                        if [ ! -s "$FAILURE" ]; then
+                            {
+                                echo "========== FIRST FAILED COMMAND =========="
+                                echo "STAGE: Source validation"
+                                echo "COMMAND: Required source file validation"
+                                echo "EXIT CODE: 1"
+                                echo "ERROR: $message"
+                                echo "=========================================="
+                            } >> "$FAILURE"
+                        fi
 
+                        echo "FAILED: $message" | tee -a "$LOG"
                         exit 1
                     }
 
@@ -126,6 +144,10 @@ ERROR: ${err.getMessage()}
             }
         }
 
+        // =====================================================
+        // STAGE 3: PREPARE ENVIRONMENT
+        // =====================================================
+
         stage('Prepare Environment') {
             steps {
                 script {
@@ -145,14 +167,19 @@ ERROR: ${err.getMessage()}
                                 echo "========== PREPARING ENVIRONMENT ==========" | tee -a "$LOG"
 
                                 if ! cp "$ENV_FILE" "$WORKSPACE/backend/.env"; then
-                                    {
-                                        echo "========== FIRST FAILED COMMAND =========="
-                                        echo "STAGE: Prepare Environment"
-                                        echo "COMMAND: Copy Jenkins environment credential"
-                                        echo "ERROR: Failed to copy environment file"
-                                        echo "=========================================="
-                                    } | tee -a "$LOG" "$FAILURE"
 
+                                    if [ ! -s "$FAILURE" ]; then
+                                        {
+                                            echo "========== FIRST FAILED COMMAND =========="
+                                            echo "STAGE: Prepare Environment"
+                                            echo "COMMAND: Copy Jenkins environment credential"
+                                            echo "EXIT CODE: 1"
+                                            echo "ERROR: Failed to copy environment file"
+                                            echo "=========================================="
+                                        } >> "$FAILURE"
+                                    fi
+
+                                    echo "Environment file copy failed." | tee -a "$LOG"
                                     exit 1
                                 fi
 
@@ -162,7 +189,9 @@ ERROR: ${err.getMessage()}
                                 echo "Environment values are not printed." | tee -a "$LOG"
                             '''
                         }
+
                     } catch (err) {
+
                         if (!fileExists('failure.log') ||
                             readFile('failure.log').trim().isEmpty()) {
 
@@ -184,9 +213,14 @@ ERROR: ${err.getMessage()}
             }
         }
 
+        // =====================================================
+        // STAGE 4: BUILD, DEPLOY AND VERIFY
+        // =====================================================
+
         stage('Build Deploy and Verify') {
             steps {
                 dir('backend') {
+
                     sh '''#!/bin/bash
                         set -Eeuo pipefail
 
@@ -196,12 +230,12 @@ ERROR: ${err.getMessage()}
                         echo "========== DOCKER ENVIRONMENT ==========" | tee -a "$LOG"
 
                         # ------------------------------------------------
-                        # Capture every command.
-                        # Only the FIRST failed command goes into
-                        # failure.log. Later diagnostics go to pipeline.log.
+                        # Run and record commands.
+                        # Only the first failure is saved in failure.log.
                         # ------------------------------------------------
 
                         run_logged() {
+
                             local label="$1"
                             shift
 
@@ -218,13 +252,17 @@ ERROR: ${err.getMessage()}
                             } | tee -a "$LOG"
 
                             set +e
+
                             "$@" 2>&1 | tee "$output_file" | tee -a "$LOG"
+
                             local command_rc=${PIPESTATUS[0]}
+
                             set -e
 
                             if [ "$command_rc" -ne 0 ]; then
 
                                 if [ ! -s "$FAILURE" ]; then
+
                                     {
                                         echo ""
                                         echo "========== FIRST FAILED COMMAND =========="
@@ -233,18 +271,23 @@ ERROR: ${err.getMessage()}
                                         echo "EXIT CODE: $command_rc"
                                         echo "TIME: $(date -Is)"
                                         echo "========== ORIGINAL ERROR OUTPUT =========="
+
                                         cat "$output_file"
+
                                         echo "=========================================="
+
                                     } >> "$FAILURE"
                                 fi
 
                                 echo "FAILED: $label (exit code $command_rc)" | tee -a "$LOG"
 
                                 rm -f "$output_file"
+
                                 return "$command_rc"
                             fi
 
                             echo "SUCCESS: $label" | tee -a "$LOG"
+
                             rm -f "$output_file"
                         }
 
@@ -257,8 +300,7 @@ ERROR: ${err.getMessage()}
                         run_logged "Docker Compose version" docker compose version
 
                         # ------------------------------------------------
-                        # Validate Docker Compose configuration FIRST.
-                        # Do not build or start containers if this fails.
+                        # Validate Compose configuration
                         # ------------------------------------------------
 
                         run_logged \
@@ -266,7 +308,7 @@ ERROR: ${err.getMessage()}
                             docker compose config -q
 
                         # ------------------------------------------------
-                        # Build image
+                        # Build Docker image
                         # ------------------------------------------------
 
                         run_logged \
@@ -274,7 +316,7 @@ ERROR: ${err.getMessage()}
                             docker compose build
 
                         # ------------------------------------------------
-                        # Verify image
+                        # Inspect Docker image
                         # ------------------------------------------------
 
                         run_logged \
@@ -283,8 +325,6 @@ ERROR: ${err.getMessage()}
 
                         # ------------------------------------------------
                         # Python syntax validation
-                        # Override the Dockerfile ENTRYPOINT so that
-                        # compileall runs as Python, not as application args.
                         # ------------------------------------------------
 
                         run_logged \
@@ -297,7 +337,7 @@ ERROR: ${err.getMessage()}
                                 -m compileall -q .
 
                         # ------------------------------------------------
-                        # Deploy
+                        # Deploy application
                         # ------------------------------------------------
 
                         run_logged \
@@ -317,15 +357,18 @@ ERROR: ${err.getMessage()}
                         # ------------------------------------------------
 
                         check_health() {
+
                             local attempt
 
                             echo "Checking API: $HEALTH_URL"
 
                             for attempt in $(seq 1 12); do
+
                                 echo "Health check attempt: $attempt/12"
 
                                 if curl -fsS \
                                     --connect-timeout 5 \
+                                    --max-time 10 \
                                     "$HEALTH_URL" \
                                     -o /dev/null; then
 
@@ -337,6 +380,7 @@ ERROR: ${err.getMessage()}
                             done
 
                             echo "API health check failed after 12 attempts."
+
                             return 1
                         }
 
@@ -349,133 +393,858 @@ ERROR: ${err.getMessage()}
         }
     }
 
+    // =========================================================
+    // POST ACTIONS
+    // =========================================================
+
     post {
 
+        // =====================================================
+        // FAILURE: COLLECT DIAGNOSTICS AND RUN OLLAMA
+        // =====================================================
+
         failure {
-            echo 'Pipeline failed. Running Ollama failure analysis.'
+
+            echo 'Pipeline failed. Collecting diagnostics and starting Ollama analysis.'
 
             sh '''#!/bin/bash
                 set +e
 
                 LOG="$WORKSPACE/pipeline.log"
                 FAILURE="$WORKSPACE/failure.log"
+                DIAG="$WORKSPACE/ollama-diagnostics.txt"
 
                 echo "" | tee -a "$LOG"
-                echo "========== OLLAMA FAILURE ANALYSIS ==========" | tee -a "$LOG"
+                echo "========== COLLECTING FAILURE DIAGNOSTICS ==========" | tee -a "$LOG"
 
                 # ------------------------------------------------
-                # Do not overwrite failure.log.
-                # Do not use secondary Docker errors as root cause.
+                # 1. Original failure and recent Jenkins logs
                 # ------------------------------------------------
 
-                if [ ! -s "$FAILURE" ]; then
-                    echo "WARNING: failure.log is empty." | tee -a "$LOG"
-                    echo "Jenkins did not record a first failure." | tee -a "$LOG"
-                fi
+                {
+                    echo "========== ORIGINAL FIRST FAILURE =========="
+
+                    if [ -s "$FAILURE" ]; then
+                        cat "$FAILURE"
+                    else
+                        echo "No first failure was recorded."
+                    fi
+
+                    echo ""
+                    echo "========== RECENT JENKINS PIPELINE LOG =========="
+
+                    if [ -f "$LOG" ]; then
+                        tail -n 500 "$LOG"
+                    fi
+
+                } > "$DIAG" 2>&1
 
                 # ------------------------------------------------
-                # Run Ollama using the original failure information.
-                # No .env content is read or sent.
+                # 2. Docker image and container diagnostics
+                # ------------------------------------------------
+
+                {
+                    echo ""
+                    echo "========== DOCKER VERSION =========="
+
+                    docker --version
+                    docker compose version
+
+                    echo ""
+                    echo "========== DOCKER IMAGE INSPECTION =========="
+
+                    docker image inspect "$IMAGE_NAME" \
+                        --format 'Image ID: {{.Id}}
+Image CMD: {{json .Config.Cmd}}
+Image ENTRYPOINT: {{json .Config.Entrypoint}}
+Working Directory: {{.Config.WorkingDir}}
+User: {{.Config.User}}'
+
+                    echo ""
+                    echo "========== CONTAINER INSPECTION =========="
+
+                    docker inspect "$CONTAINER_NAME" \
+                        --format 'Container: {{.Name}}
+Status: {{.State.Status}}
+Running: {{.State.Running}}
+Exit Code: {{.State.ExitCode}}
+Error: {{.State.Error}}
+OOM Killed: {{.State.OOMKilled}}
+Restart Count: {{.RestartCount}}
+Started At: {{.State.StartedAt}}
+Finished At: {{.State.FinishedAt}}
+Configured CMD: {{json .Config.Cmd}}
+Configured ENTRYPOINT: {{json .Config.Entrypoint}}'
+
+                    echo ""
+                    echo "========== DOCKER COMPOSE STATUS =========="
+
+                    docker compose \
+                        -f "$WORKSPACE/backend/docker-compose.yml" \
+                        ps -a
+
+                    echo ""
+                    echo "========== CONTAINER LOGS =========="
+
+                    docker logs --tail=200 "$CONTAINER_NAME" 2>&1
+
+                    echo ""
+                    echo "========== CONTAINER PROCESSES =========="
+
+                    docker top "$CONTAINER_NAME"
+
+                    echo ""
+                    echo "========== DOCKER IMAGES =========="
+
+                    docker images --no-trunc
+
+                    echo ""
+                    echo "========== DOCKER NETWORKS =========="
+
+                    docker network ls
+
+                } >> "$DIAG" 2>&1
+
+                # ------------------------------------------------
+                # 3. Network and API diagnostics
+                # ------------------------------------------------
+
+                {
+                    echo ""
+                    echo "========== LISTENING PORTS =========="
+
+                    ss -lntp
+
+                    echo ""
+                    echo "========== API HEALTH ENDPOINT =========="
+
+                    curl -v \
+                        --connect-timeout 5 \
+                        --max-time 10 \
+                        "$HEALTH_URL" \
+                        -o /dev/null
+
+                } >> "$DIAG" 2>&1
+
+                # ------------------------------------------------
+                # 4. Ollama analysis
                 # ------------------------------------------------
 
                 OLLAMA_URL="$OLLAMA_URL" \
                 OLLAMA_MODEL="$OLLAMA_MODEL" \
                 FAILURE_LOG="$FAILURE" \
-                COMPOSE_FILE="$WORKSPACE/backend/docker-compose.yml" \
-                DOCKERFILE="$WORKSPACE/backend/Dockerfile" \
+                DIAGNOSTICS_FILE="$DIAG" \
+                WORKSPACE_DIR="$WORKSPACE" \
                 python3 - <<'PY' 2>&1 | tee -a "$LOG"
 
 import os
+import re
 import json
 import urllib.request
 import urllib.error
-
-failure_path = os.environ["FAILURE_LOG"]
-compose_path = os.environ["COMPOSE_FILE"]
-dockerfile_path = os.environ["DOCKERFILE"]
+from pathlib import Path
 
 ollama_url = os.environ["OLLAMA_URL"].rstrip("/")
 model = os.environ["OLLAMA_MODEL"]
 
-def read_file(path, limit=15000):
+workspace = Path(os.environ["WORKSPACE_DIR"])
+failure_path = Path(os.environ["FAILURE_LOG"])
+diagnostics_path = Path(os.environ["DIAGNOSTICS_FILE"])
+
+
+# ------------------------------------------------------------
+# Read files safely
+# ------------------------------------------------------------
+
+def read_file(path, limit=30000):
+
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as file:
             return file.read()[:limit]
+
     except Exception as error:
-        return "Could not read file: " + str(error)
+        return "Unable to read file: " + str(error)
 
-failure_log = read_file(failure_path)
 
-compose_lines = read_file(compose_path, 10000)
-dockerfile_lines = read_file(dockerfile_path, 8000)
+# ------------------------------------------------------------
+# Secret redaction
+# ------------------------------------------------------------
 
-# Number the Compose file so Ollama can identify the exact line.
-numbered_compose = chr(10).join(
-    str(index) + ": " + line
-    for index, line in enumerate(compose_lines.splitlines(), 1)
-)
+def redact_secrets(text):
+
+    patterns = [
+        (
+            r"(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization)(\s*[:=]\s*)([\"']?)[^\s,;\n\"']+",
+            r"\1\2[REDACTED]"
+        ),
+        (
+            r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+",
+            r"\1[REDACTED]"
+        ),
+        (
+            r"(?i)(AKIA)[A-Z0-9]{16}",
+            r"[REDACTED_AWS_ACCESS_KEY]"
+        ),
+        (
+            r"(?i)(://[^:/\s]+:)[^@\s]+@",
+            r"\1[REDACTED]@"
+        )
+    ]
+
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
+
+    # Redact PEM private key blocks.
+    text = re.sub(
+        r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+        "[REDACTED PRIVATE KEY]",
+        text,
+        flags=re.DOTALL
+    )
+
+    return text
+
+
+# ------------------------------------------------------------
+# Collect source files with exact line numbers.
+# Never collect .env or secret files.
+# ------------------------------------------------------------
+
+def collect_source_files(root):
+
+    source_parts = []
+    total_chars = 0
+    max_total_chars = 35000
+    max_file_chars = 7000
+
+    allowed_files = {
+        "Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "requirements.txt",
+        "Jenkinsfile",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "pytest.ini",
+        "tox.ini",
+        "gunicorn.conf.py"
+    }
+
+    excluded_dirs = {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "node_modules",
+        ".pytest_cache",
+        ".mypy_cache",
+        "dist",
+        "build"
+    }
+
+    for current_root, dirs, files in os.walk(root):
+
+        dirs[:] = [
+            directory for directory in dirs
+            if directory not in excluded_dirs
+        ]
+
+        for filename in sorted(files):
+
+            path = Path(current_root) / filename
+
+            # Never read environment files or private key files.
+            if filename == ".env" or filename.startswith(".env."):
+                continue
+
+            if any(word in filename.lower() for word in [
+                "secret",
+                "credential",
+                "private_key",
+                "id_rsa",
+                "id_ed25519"
+            ]):
+                continue
+
+            if path.suffix.lower() in {
+                ".pem", ".key", ".p12", ".pfx",
+                ".crt", ".cer", ".jks"
+            }:
+                continue
+
+            if (
+                filename not in allowed_files
+                and path.suffix.lower() != ".py"
+            ):
+                continue
+
+            try:
+
+                content = path.read_text(
+                    encoding="utf-8",
+                    errors="replace"
+                )
+
+                numbered = "\n".join(
+                    f"{index}: {line}"
+                    for index, line in enumerate(
+                        content.splitlines(),
+                        1
+                    )
+                )
+
+                numbered = redact_secrets(numbered)
+
+                relative_path = path.relative_to(root)
+
+                section = (
+                    "\n========== SOURCE FILE: "
+                    + str(relative_path)
+                    + " ==========\n"
+                    + numbered
+                    + "\n"
+                )
+
+                remaining = max_total_chars - total_chars
+
+                if remaining <= 0:
+                    source_parts.append(
+                        "\nSOURCE COLLECTION LIMIT REACHED."
+                    )
+                    return "\n".join(source_parts)
+
+                section = section[:min(max_file_chars, remaining)]
+
+                source_parts.append(section)
+                total_chars += len(section)
+
+            except Exception as error:
+
+                source_parts.append(
+                    f"\nCould not read {path}: {error}\n"
+                )
+
+    return "\n".join(source_parts)
+
+
+# ------------------------------------------------------------
+# Read original failure and runtime diagnostics
+# ------------------------------------------------------------
+
+failure_log = read_file(failure_path, 12000)
+diagnostics = read_file(diagnostics_path, 30000)
+
+failure_log = redact_secrets(failure_log)
+diagnostics = redact_secrets(diagnostics)
+
+source_code = collect_source_files(workspace)
+
+
+# ------------------------------------------------------------
+# Comprehensive Ollama master prompt
+# ------------------------------------------------------------
 
 prompt = """
-You are an expert Jenkins, Docker, Docker Compose, YAML,
-Python and DevOps failure-analysis engineer.
+You are a Senior DevOps Engineer, SRE, Jenkins CI/CD
+Engineer, Docker Specialist, Docker Compose Specialist,
+Python Developer, FastAPI Developer and Troubleshooting Expert.
 
-Your task is to diagnose the FIRST ACTUAL FAILURE in this Jenkins build.
+Your task is to diagnose the Jenkins pipeline failure
+using the original failure log, runtime diagnostics
+and actual source code supplied below.
 
-IMPORTANT RULES:
+Your primary objective is to identify the FIRST ACTUAL
+ROOT CAUSE and provide an evidence-based correction.
 
-1. The FIRST FAILED COMMAND recorded in the failure log is authoritative.
-2. Read the ORIGINAL ERROR OUTPUT belonging to that command.
-3. Do not replace the first failure with a later or secondary error.
-4. Do not diagnose a missing container if Compose validation failed
-   before container creation.
-5. Do not claim docker compose up failed if it was never executed.
-6. If Docker Compose reports a YAML parser error, diagnose the YAML
-   syntax using the supplied Compose file.
-7. Give the exact affected file and line number when possible.
-8. Distinguish the actual error from symptoms and consequences.
-9. Do not invent commands, files, line numbers or error messages.
-10. Never request or reveal environment variable values or secrets.
-11. If information is insufficient, explicitly say so.
-12. Provide the smallest correction necessary.
+====================================================
+1. GENERAL ROOT CAUSE RULES
+====================================================
 
-FIRST FAILURE LOG:
+1. Read the complete original first-failure record.
+2. Identify the earliest failed command.
+3. Investigate whether that error is itself the root cause
+   or a symptom of an earlier configuration/runtime issue.
+4. Separate root causes from secondary errors.
+5. If multiple independent failures exist, report each
+   separately in execution order.
+6. Never invent error messages, files, commands or line numbers.
+7. Do not assume that a warning is a failure.
+8. Do not claim a command failed if it was never executed.
+9. Do not recommend changing configuration that passed
+   validation without supporting runtime evidence.
+10. If evidence is insufficient, state what is missing.
+11. Never claim that you applied a fix.
+12. Recommend the smallest correct change.
+
+The first failed command is the primary evidence anchor.
+It is not automatically the underlying root cause.
+
+====================================================
+2. GIT AND SOURCE CODE DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Repository connectivity and authentication.
+- Incorrect repository URL.
+- Incorrect branch.
+- Missing branch.
+- Checkout failures.
+- Merge conflicts.
+- Git submodule failures.
+- Missing files.
+- Incorrect working directory.
+- Incorrect Jenkins Script Path.
+- Incorrect build context.
+- Missing Dockerfile or Compose file.
+- Incorrect .dockerignore.
+- File permission problems.
+- Missing application source code.
+
+Identify the exact command and original error.
+
+====================================================
+3. JENKINS AND GROOVY DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Jenkinsfile syntax errors.
+- Groovy compilation errors.
+- Invalid Declarative Pipeline syntax.
+- Incorrect stages and post conditions.
+- Incorrect credentials IDs.
+- Missing credentials.
+- Secret file failures.
+- Shell interpreter problems.
+- Shell execution errors.
+- Incorrect environment variables.
+- Workspace permission issues.
+- Agent availability problems.
+- Timeout errors.
+- Exit-code failures.
+- Cleanup and artifact archival errors.
+
+Use the supplied Jenkinsfile source to identify
+the exact line when possible.
+
+====================================================
+4. DOCKER DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Docker daemon unavailable.
+- Docker socket unavailable.
+- Permission denied.
+- Dockerfile syntax errors.
+- Incorrect FROM, COPY, ADD, RUN, WORKDIR and ENV.
+- Missing build-context files.
+- Incorrect multi-stage builds.
+- Dependency installation failures.
+- Missing runtime files.
+- Incorrect USER permissions.
+- Incorrect EXPOSE.
+- Missing CMD.
+- Incorrect CMD.
+- Incorrect ENTRYPOINT.
+- CMD and ENTRYPOINT overrides.
+- Image build failures.
+- Image tag mismatch.
+- Image not found.
+- Container startup failures.
+- Container exit codes.
+- Restart loops.
+- Out-of-memory termination.
+
+Always inspect and compare:
+
+- Expected application startup command.
+- Image CMD.
+- Image ENTRYPOINT.
+- Container CMD.
+- Container ENTRYPOINT.
+- Container state.
+- Container exit code.
+- Container restart count.
+- Container logs.
+- Running processes.
+
+For FastAPI, verify whether the effective container
+command starts the intended Uvicorn application.
+
+If the image CMD is ["python3"] while the expected
+application requires Uvicorn, investigate whether
+the Dockerfile CMD is missing, commented out or overridden.
+
+A running container does not prove that the application
+inside the container is running.
+
+====================================================
+5. DOCKER COMPOSE DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- YAML parsing errors.
+- Incorrect indentation.
+- Unterminated quoted values.
+- Invalid YAML scalar values.
+- Incorrect services.
+- Undefined depends_on services.
+- Incorrect build context.
+- Incorrect Dockerfile path.
+- Invalid ports.
+- Invalid volumes.
+- Missing networks.
+- Incorrect environment configuration.
+- Invalid health checks.
+- Restart policy problems.
+- Container creation failures.
+- Deployment failures.
+
+If Compose validation succeeds, do not automatically
+blame YAML syntax.
+
+Use numbered source files to identify exact lines.
+
+====================================================
+6. PYTHON AND DEPENDENCY DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- SyntaxError.
+- IndentationError.
+- TabError.
+- ImportError.
+- ModuleNotFoundError.
+- AttributeError.
+- TypeError.
+- NameError.
+- ValueError.
+- KeyError.
+- FileNotFoundError.
+- PermissionError.
+- Runtime tracebacks.
+- Python version incompatibility.
+- Incorrect requirements.txt.
+- Dependency version conflicts.
+- Missing packages.
+- Incorrect module paths.
+- Circular imports.
+- Virtual environment problems.
+- Wheel and compilation failures.
+
+Identify the exact exception and affected source line
+when the supplied evidence supports it.
+
+====================================================
+7. FASTAPI AND APPLICATION DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- FastAPI initialization.
+- Missing app variable.
+- Incorrect application variable name.
+- Incorrect Uvicorn module path.
+- Route definition failures.
+- Middleware errors.
+- Startup and shutdown failures.
+- Dependency injection errors.
+- HTTP 404, 405, 422 and 500.
+- Runtime application exceptions.
+- Incorrect host binding.
+- Incorrect port binding.
+- Application process not running.
+- Application not listening.
+
+Verify whether the application listens on:
+
+0.0.0.0:8000
+
+Do not assume a running container means FastAPI is running.
+
+====================================================
+8. ENVIRONMENT AND SECRET DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Missing environment variables.
+- Incorrect variable names.
+- Missing .env file.
+- Incorrect .env location.
+- Invalid configuration values.
+- Incorrect APP_ENV.
+- Database URL configuration.
+- Redis URL configuration.
+- Missing application settings.
+
+Never print, request or repeat passwords,
+JWT secrets, API keys, access tokens or private keys.
+
+Only report variable names and whether they are missing
+or incorrectly configured.
+
+====================================================
+9. NETWORK AND PORT DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Port already in use.
+- Port not listening.
+- Incorrect host binding.
+- Docker port mapping errors.
+- Container network problems.
+- DNS resolution failures.
+- Connection refused.
+- Connection timeout.
+- Firewall restrictions.
+- Security group restrictions.
+- Nginx reverse proxy errors.
+- Upstream unavailable.
+- TLS and SSL errors.
+
+Distinguish clearly between:
+
+- Connection refused.
+- Connection timeout.
+- DNS failure.
+- HTTP error response.
+- Application not listening.
+
+Do not recommend changing ports without evidence.
+
+====================================================
+10. DATABASE AND REDIS DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Database hostname resolution.
+- Database connection timeout.
+- Authentication failure.
+- Incorrect database name.
+- Incorrect database port.
+- Database unavailable.
+- SSL configuration errors.
+- Connection pool exhaustion.
+- Migration failures.
+- Missing database tables.
+- SQL exceptions.
+- Redis connectivity failures.
+- Redis authentication errors.
+- Redis service unavailable.
+
+Never expose database credentials.
+
+====================================================
+11. DEPLOYMENT AND HEALTH CHECK DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Docker Compose deployment failure.
+- Container creation failure.
+- Container exits immediately.
+- Restart loops.
+- Unhealthy containers.
+- Application startup failure.
+- Missing application process.
+- Health endpoint failure.
+- Incorrect health endpoint.
+- Health-check timeout.
+- Slow application initialization.
+
+For health-check failures, investigate in this order:
+
+1. Original deployment result.
+2. Container state.
+3. Container exit code.
+4. Container logs.
+5. Image CMD and ENTRYPOINT.
+6. Container CMD and ENTRYPOINT.
+7. Running processes.
+8. Listening ports.
+9. Application startup errors.
+10. Docker networking and port mapping.
+11. Health endpoint response.
+
+Do not blame port mapping if the application process
+never started.
+
+====================================================
+12. AWS AND SECURITY DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Linux ownership and permissions.
+- Non-root user restrictions.
+- Missing executable permissions.
+- IAM permission failures.
+- ECR authentication failures.
+- ECR image pull errors.
+- AWS configuration errors.
+- TLS certificate failures.
+- Docker secret exposure.
+
+Do not recommend exposing credentials or disabling
+security controls as a default fix.
+
+====================================================
+13. OLLAMA DIAGNOSTICS
+====================================================
+
+Investigate:
+
+- Ollama service unavailable.
+- API timeout.
+- Model not installed.
+- Incorrect model name.
+- Model loading failure.
+- Insufficient memory.
+- Invalid API response.
+- JSON parsing error.
+- Empty or incomplete model response.
+
+If Ollama fails, report its failure separately.
+Never overwrite the original Jenkins failure.
+
+====================================================
+14. SOURCE AND LINE NUMBER RULES
+====================================================
+
+Source files are supplied with numbered lines.
+
+Use those numbers to report:
+
+- Exact affected file.
+- Exact line.
+- Exact configuration or code.
+- Why that line is incorrect.
+
+If the actual source does not prove a line number,
+write "Not confirmed".
+
+Do not infer a line number from a generic example.
+
+====================================================
+15. REQUIRED OUTPUT FORMAT
+====================================================
+
+JENKINS FAILURE ANALYSIS
+
+OVERALL STATUS:
+FAILED / PARTIALLY FAILED / INSUFFICIENT EVIDENCE
+
+ROOT CAUSE COUNT:
+
+ROOT CAUSE SUMMARY:
+
+FIRST FAILED STAGE:
+
+FIRST FAILED COMMAND:
+
+COMMAND EXIT CODE:
+
+EXACT ORIGINAL ERROR:
+
+ERROR CATEGORY:
+
+AFFECTED FILE:
+
+EXACT LINE NUMBER:
+
+EXACT COLUMN:
+
+EXACT CODE OR CONFIGURATION:
+
+WHY IT FAILED:
+
+TECHNICAL EXPLANATION:
+
+EVIDENCE:
+
+SECONDARY ERRORS:
+
+RELATED WARNINGS:
+
+DOCKER IMAGE CMD:
+
+DOCKER IMAGE ENTRYPOINT:
+
+CONTAINER STATUS:
+
+CONTAINER EXIT CODE:
+
+CONTAINER RESTART COUNT:
+
+APPLICATION STATUS:
+
+RECOMMENDED FIX:
+
+CORRECTED CODE:
+
+VERIFICATION COMMANDS:
+
+EXPECTED SUCCESSFUL RESULT:
+
+CONFIDENCE:
+HIGH / MEDIUM / LOW
+
+====================================================
+16. FINAL REQUIREMENTS
+====================================================
+
+- Base the diagnosis on supplied evidence.
+- Give the smallest correct fix.
+- Show corrected code or configuration.
+- Do not invent a successful test result.
+- Do not confuse symptoms with root causes.
+- Report multiple independent causes separately.
+- State missing evidence explicitly.
+- Never claim a fix has been applied.
+
+Now analyze the supplied Jenkins execution evidence.
+
+========== ORIGINAL FIRST FAILURE ==========
+
 """ + failure_log + """
 
-NUMBERED DOCKER COMPOSE FILE:
-""" + numbered_compose + """
+========== RUNTIME DIAGNOSTICS ==========
 
-DOCKERFILE:
-""" + dockerfile_lines + """
+""" + diagnostics + """
 
-Return your diagnosis in this exact format:
+========== NUMBERED SOURCE CODE ==========
 
-ROOT CAUSE:
-FIRST FAILED STAGE:
-FIRST FAILED COMMAND:
-EXACT ORIGINAL ERROR:
-AFFECTED FILE:
-LINE/COLUMN:
-WHY IT FAILED:
-CORRECTED CONFIGURATION OR CODE:
-RECOMMENDED FIX:
-VERIFICATION COMMAND:
-CONFIDENCE:
+""" + source_code
 
-If the first error is an unterminated YAML quoted scalar,
-identify that exact syntax problem. Do not report a missing
-container as the root cause.
-"""
+
+# ------------------------------------------------------------
+# Send request to Ollama
+# ------------------------------------------------------------
 
 payload = {
     "model": model,
     "prompt": prompt,
     "stream": False,
     "options": {
-        "temperature": 0.1
+        "temperature": 0.1,
+        "num_ctx": 16384
     }
 }
 
 try:
+
+    print()
+    print("========== CONNECTING TO OLLAMA ==========")
+    print("Model:", model)
+
     request = urllib.request.Request(
         ollama_url + "/api/generate",
         data=json.dumps(payload).encode("utf-8"),
@@ -483,18 +1252,46 @@ try:
         method="POST"
     )
 
-    with urllib.request.urlopen(request, timeout=180) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    with urllib.request.urlopen(request, timeout=300) as response:
+
+        result = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    diagnosis = result.get("response", "").strip()
 
     print()
-    print("========== OLLAMA DIAGNOSIS ==========")
-    print(result.get("response", "Ollama returned an empty response."))
-    print("========== END OLLAMA DIAGNOSIS ==========")
+    print("========== OLLAMA ROOT CAUSE ANALYSIS ==========")
+
+    if diagnosis:
+        print(diagnosis)
+    else:
+        print("Ollama returned an empty response.")
+
+    print()
+    print("========== END OLLAMA ANALYSIS ==========")
+
+except urllib.error.HTTPError as error:
+
+    print("Ollama HTTP error:", error.code)
+
+    try:
+        print(
+            error.read().decode(
+                "utf-8",
+                errors="replace"
+            )[:3000]
+        )
+    except Exception:
+        pass
+
+    print("Original Jenkins failure remains preserved.")
 
 except Exception as error:
+
     print("Ollama analysis could not be completed.")
     print("Reason:", str(error))
-    print("The original Jenkins failure is preserved in failure.log.")
+    print("Original Jenkins failure remains preserved.")
 
 PY
 
@@ -504,13 +1301,18 @@ PY
                     echo "Ollama analysis returned an error." | tee -a "$LOG"
                 fi
 
-                echo "========== END OLLAMA FAILURE ANALYSIS ==========" | tee -a "$LOG"
+                echo "========== OLLAMA FAILURE ANALYSIS COMPLETED ==========" | tee -a "$LOG"
 
                 exit 0
             '''
         }
 
+        // =====================================================
+        // CLEANUP: RUN AFTER FAILURE ANALYSIS
+        // =====================================================
+
         cleanup {
+
             echo 'Cleaning temporary environment files and archiving logs.'
 
             sh '''#!/bin/bash
@@ -522,12 +1324,13 @@ PY
             '''
 
             archiveArtifacts(
-                artifacts: 'pipeline.log,failure.log',
+                artifacts: 'pipeline.log,failure.log,ollama-diagnostics.txt',
                 allowEmptyArchive: true,
                 fingerprint: true
             )
 
             echo 'Cleaning Jenkins workspace after log archiving.'
+
             deleteDir()
         }
     }
